@@ -4,7 +4,7 @@
  * appends the transition's events, all in one `BEGIN IMMEDIATE` transaction, so concurrent sessions never lose
  * each other's updates.
  *
- * The tables are meant to be read by other tools too (`sqlite3 <scope>.db 'select * from slots'`); see the README.
+ * The tables are meant to be read by other tools too (`sqlite3 <scope>.db 'select * from slots'`); see docs/event-log.md.
  */
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";

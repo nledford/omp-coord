@@ -85,6 +85,6 @@ Free and open source under the MIT license. No paid tier, no telemetry.
 
 ## Stack
 
-- [README.md](README.md): install, configuration, use.
+- [README.md](README.md): what it is, quick start; [docs/](docs/README.md): install, configuration, how it works, reference.
 - [AGENTS.md](AGENTS.md): code layout and conventions for coding agents.
 - [examples/omp-coord.json](examples/omp-coord.json): a complete configuration.

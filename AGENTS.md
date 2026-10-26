@@ -1,11 +1,11 @@
 # omp-coord: notes for agents working on this repo
 
-An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord` command-line runner for build and test queues. User-facing behavior and configuration: `README.md`.
+An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord` command-line runner for build and test queues. User-facing behavior and configuration: `README.md` and `docs/`. A change to behavior updates the matching page under `docs/` in the same commit.
 
 ## Commands
 
 - `just` lists the workflows. `just install`, then `just check` (typecheck, every test, version files agreeing) before every commit; `just test <file>` or `just test -t <pattern>` while iterating.
-- A user-visible change adds a line under Unreleased in `CHANGELOG.md` in the same commit; mark a contract break **Breaking:** (the contract and the bump rules are under "Versioning" in the README). Never edit the version in `package.json` or `.omp-plugin/marketplace.json` by hand: `just release <fix|feature|breaking>` does it in the release commit. Releases are cut and published by a maintainer.
+- A user-visible change adds a line under Unreleased in `CHANGELOG.md` in the same commit; mark a contract break **Breaking:** (the contract and the bump rules: `docs/versioning.md`). Never edit the version in `package.json` or `.omp-plugin/marketplace.json` by hand: `just release <fix|feature|breaking>` does it in the release commit. Releases are cut and published by a maintainer.
 - Load a working copy into omp: `just omp-dev` (scratch state folder; run it from a folder holding a scratch `.omp-coord.json`). Never point `OMP_COORD_STATE_DIR` at the real `~/.omp/run/omp-coord` while testing. `just events <scope>` reads that scratch board's event log.
 - Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool.
 - `src/` changes that move the CLI need `just unlink && just link` so `~/.bun/bin/omp-coord` follows.
