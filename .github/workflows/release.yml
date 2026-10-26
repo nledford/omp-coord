@@ -54,8 +54,8 @@ jobs:
           fi
           printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_TOKEN" > "$RUNNER_TEMP/.npmrc"
           npm publish --userconfig "$RUNNER_TEMP/.npmrc"
-          # The registry serves what was just published.
-          test "$(npm view "@nledford/omp-coord@$version" version --userconfig "$RUNNER_TEMP/.npmrc")" = "$version"
+          # The registry serves what was just published (publishConfig applies to publish only, so name the registry).
+          test "$(npm view "@nledford/omp-coord@$version" version --registry https://npm.pkg.github.com --userconfig "$RUNNER_TEMP/.npmrc")" = "$version"
 
   release:
     needs: [check, publish]
