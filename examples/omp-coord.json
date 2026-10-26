@@ -1,0 +1,42 @@
+{
+  "scope": "lightcraft",
+  "agents": {
+    "pools": {
+      "work": { "cap": 8 },
+      "short": { "cap": 2, "agentTypes": ["scout"] }
+    },
+    "defaultPool": "work",
+    "exempt": ["reviewer", "security-reviewer"],
+    "nested": { "allow": ["reviewer", "security-reviewer"], "maxRunningPerParent": 1 },
+    "holdMinutes": 5,
+    "startTimeoutSeconds": 120
+  },
+  "messages": { "perMinute": 10 },
+  "history": { "retentionDays": 30, "maxEvents": 100000 },
+  "refuseCommands": [
+    {
+      "pattern": "(^|[;&|(\\s])cargo\\s+(test|check|clippy)\\b",
+      "reason": "use the recipes (just test, just test-ui, just check, just lint): they wait for a test slot and keep the cores for the CI slots"
+    },
+    {
+      "pattern": "(^|[;&|(\\s])cargo\\s+xtask\\s+ci\\b",
+      "reason": "use just ci: it waits for a heavy-build slot"
+    },
+    {
+      "pattern": "(^|[;&|(\\s])cargo\\s+build\\b[^;&|]*--release",
+      "reason": "use just build: it waits for a heavy-build slot"
+    },
+    {
+      "pattern": "(^|[;&|(\\s])pkill\\b",
+      "reason": "pkill can stop other agents' builds and shells; stop only the process you started, by its PID"
+    },
+    {
+      "pattern": "(^|[;&|(\\s])git\\s+(-C\\s+\\S+\\s+)?stash\\b",
+      "reason": "stashes are shared by all worktrees: commit to a throwaway branch instead"
+    }
+  ],
+  "queues": [
+    { "name": "heavy", "dir": "/tmp/lightcraft-ci-slots", "slots": 2 },
+    { "name": "test", "dir": "/tmp/lightcraft-test-slots", "slots": 3 }
+  ]
+}

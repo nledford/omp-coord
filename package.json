@@ -1,0 +1,17 @@
+{
+  "name": "omp-coord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "omp extension: shared subagent caps, a session registry and messages across omp sessions on one machine",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}
