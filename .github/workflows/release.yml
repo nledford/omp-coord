@@ -66,9 +66,11 @@ jobs:
             fi
             exit 1
           fi
-          # npm processes a new version for some minutes before serving it; a successful publish is authoritative.
+          # npm processes a new version for some minutes before serving it, and lists it before its tarball downloads;
+          # a successful publish is authoritative, so this waits up to 15 minutes and then only warns.
           for _ in $(seq 90); do
-            [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ] && exit 0
+            tarball=$(npm view "@nledford/omp-coord@$version" dist.tarball --registry "$registry" 2>/dev/null) || tarball=""
+            [ -n "$tarball" ] && curl -sfI "$tarball" >/dev/null && exit 0
             sleep 10
           done
           echo "::warning::npm accepted @nledford/omp-coord@$version but did not serve it within 15 minutes; check https://www.npmjs.com/package/@nledford/omp-coord"
