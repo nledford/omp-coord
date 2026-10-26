@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-26
+
 ### Added
 
 - Releases are published to npmjs.com as `@nledford/omp-coord`, with provenance: `omp plugin install @nledford/omp-coord` needs no token or `.npmrc`.
@@ -44,6 +46,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nledford/omp-coord/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nledford/omp-coord/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nledford/omp-coord/releases/tag/v0.1.0
