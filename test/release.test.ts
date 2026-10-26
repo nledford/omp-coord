@@ -33,7 +33,7 @@ describe("versions and tags", () => {
   });
 
   test("the last release is the highest vX.Y.Z tag, not the newest or the last listed; other tags are ignored", () => {
-    expect(formatVersion(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "v0.11.0-rc.1"])!)).toBe("0.10.0");
+    expect(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "v0.11.0-rc.1"])).toEqual({ major: 0, minor: 10, patch: 0 });
     expect(latestRelease(["nightly"])).toBeUndefined();
   });
 

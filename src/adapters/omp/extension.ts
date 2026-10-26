@@ -54,18 +54,21 @@ interface Runtime {
   pruning: boolean;
 }
 
-/** Shared by every copy of this module in the process (omp re-imports extensions for isolated subagents). */
-const shared = ((globalThis as { [key: symbol]: unknown })[Symbol.for("omp-coord.runtime")] ??= {
-  runtime: undefined,
-  inactive: NO_CONFIG,
-  bindings: new Map(),
-}) as {
+interface Shared {
   runtime: Runtime | undefined;
   /** Why there is no runtime, for tools and `/coord`. */
   inactive: string;
   /** Each subagent's binding, by agent id: a message for that subagent is sent through it. */
   bindings: Map<string, ExtensionAPI>;
-};
+}
+
+/** Shared by every copy of this module in the process (omp re-imports extensions for isolated subagents). */
+const shared: Shared = (() => {
+  const store = globalThis as { [key: symbol]: Shared | undefined };
+  const key = Symbol.for("omp-coord.runtime");
+  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map() };
+  return store[key];
+})();
 
 export default function ompCoord(pi: ExtensionAPI): void {
   pi.setLabel("omp-coord");

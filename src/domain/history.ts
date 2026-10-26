@@ -82,7 +82,9 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
     if (e.type === "job_started") {
       const q = String(e.data.queue);
       queueOf(s, q).started++;
-      (s.waits[q] ??= []).push(n("waitedMs"));
+      const waits = s.waits[q] ?? [];
+      waits.push(n("waitedMs"));
+      s.waits[q] = waits;
     }
     if (e.type === "job_ended") {
       const q = queueOf(s, String(e.data.queue));

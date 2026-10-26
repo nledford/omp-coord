@@ -141,7 +141,7 @@ export function setJobPriority(board: Board, r: { id: string; sessionId: string;
     return { ok: false, reason: `priority must be a whole number from -${MAX_PRIORITY} to ${MAX_PRIORITY}` };
   }
   const job = board.jobs.find(j => j.id === r.id);
-  if (!job || job.state !== "waiting") return { ok: false, reason: `no waiting job ${r.id}` };
+  if (job?.state !== "waiting") return { ok: false, reason: `no waiting job ${r.id}` };
   if (job.owner !== r.sessionId) return { ok: false, reason: `job ${r.id} belongs to another session` };
   job.priority = r.priority;
   emit(board, r.now, "job_reprioritized", r.sessionId, { job: job.id, queue: job.queue, priority: r.priority });
