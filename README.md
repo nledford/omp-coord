@@ -61,17 +61,17 @@ When an agent's bash command matches a `queue` rule, the extension rewrites it t
 
 Requires omp 18.12 or later. No dependencies at runtime: the extension and the runner use the Bun built into omp.
 
-From GitHub (the repository is private for now, so this needs access to it):
+From GitHub over SSH (the repository is private for now; HTTPS and `github:` shorthands fail without credentials):
 
 ```sh
-omp plugin install github:nledford/omp-coord
+omp plugin install "git+ssh://git@github.com/nledford/omp-coord.git"
 ```
 
 or through omp's marketplace, which this repository also serves:
 
-```
-/marketplace add nledford/omp-coord
-/marketplace install omp-coord@omp-coord
+```sh
+omp plugin marketplace add git@github.com:nledford/omp-coord.git
+omp plugin install omp-coord@omp-coord
 ```
 
 From a checkout, link it instead: `omp plugin install /path/to/omp-coord`, or load it for one run with `omp -e /path/to/omp-coord/src/index.ts`.
