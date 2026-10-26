@@ -67,14 +67,14 @@ From GitHub over SSH. The repository is private for now, and the `github:` short
 omp plugin install "git+ssh://git@github.com/nledford/omp-coord.git"
 ```
 
-Bun remembers the commit a git URL resolved to, so installing again can bring back an older commit. To move to the newest commit on `main`, run `omp plugin upgrade omp-coord`. To pin a release, add its tag, e.g. `…/omp-coord.git#v0.1.0`.
-
 Or install it through omp's marketplace, which this repository also serves:
 
 ```sh
 omp plugin marketplace add git@github.com:nledford/omp-coord.git
 omp plugin install omp-coord@omp-coord
 ```
+
+Bun remembers the commit a git URL resolved to, so installing again can bring back an older commit. `omp plugin upgrade omp-coord` moves a git URL install to the newest commit on `main`, and a marketplace install to `main` once a release has raised the catalog's version. To pin a release, add its tag: `…/omp-coord.git#v0.1.0`.
 
 From a checkout, link it instead: `omp plugin install /path/to/omp-coord`, or load it for one run with `omp -e /path/to/omp-coord/src/index.ts`.
 
@@ -180,6 +180,37 @@ The schema version is in `PRAGMA user_version`. A database with a different sche
 - A message is put into the other session's conversation as written, marked as coming from another session. Text an agent copies into a message from an untrusted source reaches the other session too.
 - `/tan` clones are subagents to omp, so they take slots from the default pool and fall under the rules for agents started by subagents.
 - On one machine only: sessions find each other through a shared folder, not the network.
+
+## Versioning
+
+Releases follow [Semantic Versioning](https://semver.org/) and are tagged `vX.Y.Z`; [CHANGELOG.md](CHANGELOG.md) lists what each one changed. The version covers this contract:
+
+- the `.omp-coord.json` fields, their defaults and what they accept;
+- the `omp-coord` subcommands, flags and exit codes (75, 124, 2);
+- the agent tools (`coord_*`) and their parameters, and the `/coord` commands;
+- the environment variables it sets or reads (`OMP_COORD_*`);
+- the event types and fields in the event log, and the decision log, as documented above;
+- the minimum omp version.
+
+Not covered: the wording of messages and reports, the other state tables (rebuilt as sessions come and go), and anything under `src/` that the above does not expose.
+
+| Change | Before 1.0.0 | From 1.0.0 |
+|---|---|---|
+| Breaks the contract: a removed or renamed field, flag, tool or event; a narrower accepted value; a changed default or exit code; a higher minimum omp version | minor (0.3.4 → 0.4.0) | major |
+| Adds to it without breaking: a new field, flag, tool, event or event field | patch (0.3.4 → 0.3.5) | minor |
+| Fixes behavior to match the documentation | patch | patch |
+
+1.0.0 comes when the contract is declared stable, after real use in a project. Until then, read the changelog before upgrading across a minor version.
+
+Cutting a release (from `main`, with a clean work tree):
+
+```sh
+just release-plan              # commits and changelog since the last release; the next version for each kind of change
+just release fix               # or feature, breaking, or an exact version such as 1.0.0 or 0.4.0-rc.1
+just release-publish           # asks, then pushes main and the tag; CI checks it and creates the GitHub release
+```
+
+`just release` refuses an empty Unreleased section in the changelog, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs `just check`, then commits `Release vX.Y.Z` and tags it, all locally. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
 
 ## Develop
 

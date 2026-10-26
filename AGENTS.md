@@ -4,7 +4,8 @@ An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord`
 
 ## Commands
 
-- `just` lists the workflows. `just install`, then `just check` (typecheck and every test) before every commit; `just test <file>` or `just test -t <pattern>` while iterating.
+- `just` lists the workflows. `just install`, then `just check` (typecheck, every test, version files agreeing) before every commit; `just test <file>` or `just test -t <pattern>` while iterating.
+- A user-visible change adds a line under Unreleased in `CHANGELOG.md` in the same commit; mark a contract break **Breaking:** (the contract and the bump rules are under "Versioning" in the README). Never edit the version in `package.json` or `.omp-plugin/marketplace.json` by hand: `just release <fix|feature|breaking>` does it in the release commit. Releases are cut and published by a maintainer.
 - Load a working copy into omp: `just omp-dev` (scratch state folder; run it from a folder holding a scratch `.omp-coord.json`). Never point `OMP_COORD_STATE_DIR` at the real `~/.omp/run/omp-coord` while testing. `just events <scope>` reads that scratch board's event log.
 - Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool.
 - `src/` changes that move the CLI need `just unlink && just link` so `~/.bun/bin/omp-coord` follows.
@@ -64,5 +65,5 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 
 ## Tests
 
-- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/features.test.ts`: pause, load limits, claims, notes, ports, subagent messages and event-log reports. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check, round-trips) and socket liveness. `test/cli.test.ts`: the CLI across real processes (waiting, exit codes, duplicates, a killed runner, time limits, pause, doctor).
+- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/features.test.ts`: pause, load limits, claims, notes, ports, subagent messages and event-log reports. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check, round-trips) and socket liveness. `test/cli.test.ts`: the CLI across real processes (waiting, exit codes, duplicates, a killed runner, time limits, pause, doctor). `test/release.test.ts`: version arithmetic and the changelog cut in `scripts/release.ts`.
 - Tests that need several processes spawn `bun` children; keep them, they are the evidence that processes don't lose each other's writes or slots.
