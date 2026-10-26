@@ -69,7 +69,7 @@ omp plugin install "git+ssh://git@github.com/nledford/omp-coord.git"
 
 Bun remembers the commit a git URL resolved to, so installing again can bring back an older commit. To move to the newest commit on `main`, run `omp plugin upgrade omp-coord`. To pin a release, add its tag, e.g. `…/omp-coord.git#v0.1.0`.
 
-or through omp's marketplace, which this repository also serves:
+Or install it through omp's marketplace, which this repository also serves:
 
 ```sh
 omp plugin marketplace add git@github.com:nledford/omp-coord.git
