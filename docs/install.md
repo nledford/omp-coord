@@ -2,6 +2,25 @@
 
 Requires omp 18.12 or later. No dependencies at runtime: the extension and the runner use the Bun built into omp.
 
+## From GitHub Packages
+
+Each release is published as the npm package `@nledford/omp-coord` to GitHub Packages. It is private like the repository, and GitHub Packages asks for a token even for public packages, so each machine needs one-time setup: a token that can read packages, and the `@nledford` scope pointed at GitHub's registry in `~/.npmrc`.
+
+```sh
+gh auth refresh --scopes read:packages      # once: let the GitHub CLI's token read packages
+cat >> ~/.npmrc <<EOF
+@nledford:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=$(gh auth token)
+EOF
+```
+
+Then install a release, or the newest one:
+
+```sh
+omp plugin install @nledford/omp-coord@0.2.0
+omp plugin install @nledford/omp-coord
+```
+
 ## From GitHub
 
 Over SSH. The repository is private for now, and the `github:` shorthand and HTTPS URLs fail without credentials; `github:nledford/omp-coord` works once it is public:
@@ -19,7 +38,7 @@ omp plugin install omp-coord@omp-coord
 
 ## Updating
 
-Bun remembers the commit a git URL resolved to, so installing again can bring back an older commit. `omp plugin upgrade omp-coord` moves a git URL install to the newest commit on `main`, and a marketplace install to `main` once a release has raised the catalog's version. To pin a release, add its tag: `…/omp-coord.git#v0.1.0`. [CHANGELOG.md](../CHANGELOG.md) lists what each release changed.
+`omp plugin upgrade @nledford/omp-coord` moves a package or git URL install to the newest release or commit; `omp plugin upgrade omp-coord@omp-coord` moves a marketplace install once a release has raised the catalog's version. Bun remembers the commit a git URL resolved to, so installing a git URL again can bring back an older commit; to pin a release over git, add its tag: `…/omp-coord.git#v0.2.0`. [CHANGELOG.md](../CHANGELOG.md) lists what each release changed.
 
 ## From a checkout
 

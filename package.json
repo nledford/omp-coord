@@ -1,7 +1,16 @@
 {
-  "name": "omp-coord",
+  "name": "@nledford/omp-coord",
   "version": "0.1.0",
-  "private": true,
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "files": [
+    "src",
+    "docs",
+    "examples",
+    ".omp-plugin",
+    "CHANGELOG.md"
+  ],
   "description": "omp extension and CLI: shared subagent caps, build and test queues, claims and messages across omp sessions on one machine",
   "license": "MIT",
   "author": "Nathaniel Ledford",

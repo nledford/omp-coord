@@ -6,6 +6,18 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- Each release is published as the npm package `@nledford/omp-coord` to GitHub Packages; see [docs/install.md](docs/install.md).
+
+### Changed
+
+- **Breaking:** the package is now named `@nledford/omp-coord`, so omp lists and upgrades a git or package install under that name (`omp plugin upgrade @nledford/omp-coord`). Marketplace installs keep `omp-coord@omp-coord`.
+
+### Fixed
+
+- In a container whose first process never reaps orphans, a job stopped by its time limit no longer holds its slot for the whole 10-second grace period: exited processes left in its process group no longer count as running.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added

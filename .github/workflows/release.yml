@@ -1,7 +1,8 @@
-# On a version tag (vX.Y.Z), pushed by `just release-publish`: check that the tag names a commit on
-# main whose version files and changelog match it, run the checks, then create the GitHub release with the changelog
-# entry as its notes. omp installs plugins from git, so the tag itself is the publication; nothing goes to a registry.
-# Re-running the workflow for a tag that already has a release fails at `gh release create` instead of replacing it.
+# On a version tag (vX.Y.Z), pushed by `just release-publish`: check that the tag names a commit on main whose
+# version files and changelog match it, run the checks, publish the npm package @nledford/omp-coord to GitHub
+# Packages, then create the GitHub release with the changelog entry as its notes. A GitHub release therefore always
+# has its package. Re-running is safe: a version already in GitHub Packages is not published again (published
+# versions cannot be replaced), and `gh release create` fails rather than replace an existing release.
 name: Release
 
 on:
@@ -31,8 +32,33 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
 
-  release:
+  publish:
     needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Publish to GitHub Packages, unless this version is there already
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          published=$(gh api --paginate "/users/$GITHUB_REPOSITORY_OWNER/packages/npm/omp-coord/versions" --jq '.[].name' 2>/dev/null) || published=""
+          if grep -qxF "$version" <<<"$published"; then
+            echo "@nledford/omp-coord@$version is already published"
+            exit 0
+          fi
+          printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_TOKEN" > "$RUNNER_TEMP/.npmrc"
+          npm publish --userconfig "$RUNNER_TEMP/.npmrc"
+          # The registry serves what was just published.
+          test "$(npm view "@nledford/omp-coord@$version" version --userconfig "$RUNNER_TEMP/.npmrc")" = "$version"
+
+  release:
+    needs: [check, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

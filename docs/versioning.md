@@ -11,7 +11,8 @@ The version covers:
 - the agent tools (`coord_*`) and their parameters, and the `/coord` commands;
 - the environment variables it sets or reads (`OMP_COORD_*`);
 - the event types and fields in the event log, and the decision log ([event log](event-log.md));
-- the minimum omp version.
+- the minimum omp version;
+- the package name (`@nledford/omp-coord`) and the marketplace plugin name (`omp-coord@omp-coord`) that install and upgrade it.
 
 Not covered: the wording of messages and reports, the other state tables (rebuilt as sessions come and go), and anything under `src/` that the above does not expose.
 

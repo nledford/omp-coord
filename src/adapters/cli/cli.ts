@@ -14,7 +14,7 @@
  * 2 a usage or configuration error.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -295,7 +295,8 @@ async function spawnCommand(
   const exitCode = await child.exited;
   clearTimeout(limit);
   if (termAt !== undefined) {
-    while (signal(0) && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
+    const running = () => (o.ownGroup ? groupRunning(child.pid) : signal(0));
+    while (running() && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
     signal("SIGKILL");
   }
   return {
@@ -306,6 +307,32 @@ async function spawnCommand(
 
 function signalNumber(signal: NodeJS.Signals): number {
   return constants.signals[signal] ?? 1;
+}
+
+/**
+ * Whether process group `pgid` still has a member that has not exited. A signal to the group succeeds while it holds
+ * only zombies, which is what an exited command's children become in a container whose first process never reaps
+ * orphans; on Linux, /proc tells them apart. Elsewhere (macOS has no /proc; launchd reaps orphans) the signal decides.
+ */
+function groupRunning(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+  } catch {
+    return false;
+  }
+  if (process.platform !== "linux") return true;
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      // /proc/<pid>/stat: "pid (comm) state ppid pgrp …"; comm may contain spaces and parentheses.
+      const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+      const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (Number(pgrp) === pgid && state !== "Z") return true;
+    } catch {
+      // The process ended while being read.
+    }
+  }
+  return false;
 }
 
 if (import.meta.main) {
