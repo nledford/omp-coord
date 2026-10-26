@@ -15,6 +15,11 @@ export function resume(board: Board, policy: AgentPolicy, queues: Queues, r: { b
   if (!board.pause) return;
   emit(board, r.now, "resumed", r.by, { pausedMs: r.now - board.pause.since });
   board.pause = undefined;
+  // Slots held before the pause could not be used during it: each gets its full hold time again, and a new notice.
+  for (const t of board.waitlist.filter(t => t.holdUntil !== undefined)) {
+    t.holdUntil = r.now + policy.holdMs;
+    t.notified = false;
+  }
   grantHolds(board, policy, r.now);
   schedule(board, queues, r.now);
 }

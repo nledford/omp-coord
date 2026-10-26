@@ -185,12 +185,16 @@ export function agentEnded(board: Board, policy: AgentPolicy, a: { sessionId: st
   expire(board, policy, a.now);
 }
 
-/** Drops spawns that never started and holds nobody used, then hands freed slots to the sessions in line. */
+/**
+ * Drops spawns that never started and holds nobody used, then hands freed slots to the sessions in line. While
+ * paused, holds do not run out: their sessions cannot use them, and `resume` starts them again.
+ */
 export function expire(board: Board, policy: AgentPolicy, now: number): void {
   for (const s of board.slots.filter(s => s.state === "starting" && now - s.since > policy.startTimeoutMs)) {
     emit(board, now, "start_expired", s.sessionId, { agentType: s.agentType, pool: s.pool });
   }
   board.slots = board.slots.filter(s => s.state !== "starting" || now - s.since <= policy.startTimeoutMs);
+  if (board.pause) return;
   for (const t of board.waitlist.filter(t => t.holdUntil !== undefined && now > t.holdUntil)) {
     emit(board, now, "hold_expired", t.sessionId, { pool: t.pool, waitedMs: now - t.since });
   }

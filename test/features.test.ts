@@ -50,6 +50,25 @@ describe("pause and drain", () => {
     expect(b.waitlist.find(t => t.sessionId === "a")?.holdUntil).toBe(4 + policy.holdMs);
     expect(b.events.map(e => e.type)).toContain("paused");
   });
+
+  test("a slot held for a session when the pause starts stays held through it, with the full hold time after", () => {
+    const one: AgentPolicy = { ...policy, pools: { work: { cap: 1, agentTypes: [], loadCaps: [] } } };
+    const b = boardWith("a", "b", "c");
+    requestSpawn(b, one, { sessionId: "a", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
+    agentStarted(b, one, { sessionId: "a", agentId: "A1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
+    for (const s of ["b", "c"]) requestSpawn(b, one, { sessionId: s, parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
+    agentEnded(b, one, { sessionId: "a", agentId: "A1", now: 2 });
+    expect(b.waitlist.find(t => t.sessionId === "b")?.holdUntil).toBe(2 + one.holdMs);
+
+    pause(b, { by: null, reason: "merging", now: 3 });
+    agentEnded(b, one, { sessionId: "a", agentId: "none", now: 60 * MIN }); // a tick long after the hold would have run out
+    resume(b, one, {}, { by: null, now: 61 * MIN });
+    expect(b.waitlist.map(t => [t.sessionId, t.holdUntil])).toEqual([
+      ["b", 61 * MIN + one.holdMs],
+      ["c", undefined],
+    ]);
+    expect(requestSpawn(b, one, { sessionId: "b", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 62 * MIN }).allowed).toBe(true);
+  });
 });
 
 describe("load-aware limits", () => {
@@ -105,6 +124,53 @@ describe("claims", () => {
     expect(by("gh pr view 2913")).toBeUndefined();
     expect(by("git push fork fix-xy")).toBeUndefined();
     expect(claimConflict(b, { sessionId: "a", command: "git push fork fix-x", cwd: "/repo" })).toBeUndefined();
+  });
+
+  test("the guard sees force-pushes, flags before a PR number, PR URLs and gh api writes", () => {
+    const b = boardWith("a", "b");
+    claim(b, { sessionId: "a", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 0 });
+    claim(b, { sessionId: "a", agentId: "Main", kind: "pr", target: "2913", note: "", now: 0 });
+    const by = (command: string) => claimConflict(b, { sessionId: "b", command, cwd: "/repo" })?.target;
+
+    expect(by("git push fork +fix-x")).toBe("fix-x");
+    expect(by("git push fork +HEAD:fix-x")).toBe("fix-x");
+    expect(by("gh pr merge --squash 2913")).toBe("2913");
+    expect(by("gh pr review --approve 2913")).toBe("2913");
+    expect(by("gh pr merge https://github.com/o/r/pull/2913")).toBe("2913");
+    expect(by("gh api -X PATCH repos/o/r/pulls/2913 -f title=x")).toBe("2913");
+    expect(by("gh api repos/o/r/issues/2913/comments -f body=hi")).toBe("2913");
+
+    expect(by("gh api repos/o/r/pulls/2913")).toBeUndefined();
+    expect(by("gh pr merge --squash 2914 && echo 2913")).toBeUndefined();
+  });
+
+  test("the guard leaves alone commit messages, nested worktrees and commands that cd out of a claimed worktree", () => {
+    const b = boardWith("a", "b");
+    claim(b, { sessionId: "a", agentId: "Main", kind: "branch", target: "docs", note: "", now: 0 });
+    claim(b, { sessionId: "a", agentId: "Main", kind: "worktree", target: "/repo", note: "", now: 0 });
+    const roots = new Set(["/repo", "/repo/.claude/worktrees/b1"]);
+    const by = (command: string, cwd: string) =>
+      claimConflict(b, { sessionId: "b", command, cwd, home: "/home/u", isWorktreeRoot: d => roots.has(d) })?.target;
+    const mine = "/repo/.claude/worktrees/b1";
+
+    expect(by('git commit -m "docs: tidy readme"', mine)).toBeUndefined();
+    expect(by("git commit -am 'docs: tidy'", mine)).toBeUndefined();
+    expect(by("git commit --message=docs", mine)).toBeUndefined();
+    expect(by("git commit -am wip", `${mine}/src`)).toBeUndefined();
+    expect(by(`cd ${mine} && git commit -am wip`, "/repo")).toBeUndefined();
+
+    expect(by("git commit -am wip", "/repo/src")).toBe("/repo");
+    expect(by(`cd ${mine} && git -C /repo commit -am wip`, "/tmp")).toBe("/repo");
+    expect(by("git branch -m docs old-docs", mine)).toBe("docs");
+    expect(by("git push fork docs", mine)).toBe("docs");
+  });
+
+  test("cd to the home folder resolves through it", () => {
+    const b = boardWith("a", "b");
+    claim(b, { sessionId: "a", agentId: "Main", kind: "worktree", target: "/home/u/repo/wt", note: "", now: 0 });
+    const by = (command: string) => claimConflict(b, { sessionId: "b", command, cwd: "/tmp", home: "/home/u" })?.target;
+    expect(by("cd ~/repo/wt && git commit -am wip")).toBe("/home/u/repo/wt");
+    expect(by('cd "$HOME/repo/wt" && git commit -am wip')).toBe("/home/u/repo/wt");
   });
 });
 

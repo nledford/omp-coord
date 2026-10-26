@@ -54,7 +54,15 @@ export async function runJob(spec: JobSpec, queues: Queues, p: RunnerPorts): Pro
   try {
     const { timeoutMs: ownTimeout, ...fields } = spec;
     const request = { ...fields, socket: listener.address };
-    const join = () => p.repo.transact(b => enqueueJob(b, queues, { ...request, now: p.clock.now() }));
+    // The load is recorded before joining: a job that can start at once is checked against current load limits.
+    const join = () => {
+      const load = p.load.load();
+      return p.repo.transact(b => {
+        const now = p.clock.now();
+        if (load !== undefined) observeLoad(b, load, now);
+        return enqueueJob(b, queues, { ...request, now });
+      });
+    };
     const leave = (exitCode: number | null, timedOut = false) =>
       p.repo.transact(b => jobEnded(b, queues, { id: spec.id, exitCode, timedOut, now: p.clock.now() }));
 
@@ -122,10 +130,14 @@ export async function runJob(spec: JobSpec, queues: Queues, p: RunnerPorts): Pro
 
     const timeoutMs = ownTimeout === undefined ? (queues[spec.queue]?.timeoutMs ?? null) : ownTimeout;
     const { code, timedOut } = await p.execute(timeoutMs);
-    if (timedOut) p.report(`omp-coord: stopped after the ${spec.queue} time limit of ${Math.round((timeoutMs ?? 0) / 60_000)} min`);
+    if (timedOut) p.report(`omp-coord: stopped after the ${spec.queue} time limit of ${formatLimit(timeoutMs ?? 0)}`);
     leave(code, timedOut);
     return timedOut ? EXIT_TIMED_OUT : code;
   } finally {
     listener.stop();
   }
+}
+
+function formatLimit(ms: number): string {
+  return ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`;
 }

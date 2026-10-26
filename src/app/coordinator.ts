@@ -14,7 +14,7 @@ import {
   requestSpawn,
   takeNewHolds,
 } from "../domain/agents.ts";
-import { type ClaimResult, claim, claimConflict, claimRefused, normalizeTarget, release } from "../domain/claims.ts";
+import { type ClaimResult, type CommandQuery, claim, claimConflict, claimRefused, normalizeTarget, release } from "../domain/claims.ts";
 import { pause, resume } from "../domain/control.ts";
 import { type DayStats, type InterruptedSession, interrupted, stats } from "../domain/history.ts";
 import { observeLoad } from "../domain/limits.ts";
@@ -102,7 +102,7 @@ export class Coordinator {
   }
 
   /** Another session's claim the command would change, recorded as a refusal; undefined when it may run. */
-  checkCommand(q: { sessionId: string; command: string; cwd: string }): Claim | undefined {
+  checkCommand(q: CommandQuery): Claim | undefined {
     const conflict = claimConflict(this.repo.read(), q);
     if (conflict) this.repo.transact(b => claimRefused(b, q.sessionId, conflict, this.clock.now()));
     return conflict;

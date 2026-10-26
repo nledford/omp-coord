@@ -23,10 +23,12 @@ export function freeBlock(from: number, to: number, size: number, taken: PortRan
 
 export type AgentPortsResult = { ok: true; ports: PortRange } | { ok: false; reason: string };
 
-/** The agent's block in its session's range, taking a free one the first time. */
+/** The agent's block in its session's range, taking a free one the first time. Only for scopes that hand out ports. */
 export function agentPorts(board: Board, a: { sessionId: string; agentId: string; perAgent: number }): AgentPortsResult {
   const session = board.sessions.find(s => s.id === a.sessionId);
-  if (!session?.ports) return { ok: false, reason: "this scope hands out no ports (resources.ports in .omp-coord.json)" };
+  if (!session?.ports) {
+    return { ok: false, reason: "this session got no ports when it started: other sessions held every block of resources.ports" };
+  }
   const own = board.agentPorts.find(p => p.sessionId === a.sessionId && p.agentId === a.agentId);
   if (own) return { ok: true, ports: { from: own.from, to: own.to } };
   const block = freeBlock(

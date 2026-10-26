@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { Coordinator } from "../../app/coordinator.ts";
 import { doctor } from "../../app/doctor.ts";
-import { runJob } from "../../app/job-runner.ts";
+import { EXIT_TIMED_OUT, runJob } from "../../app/job-runner.ts";
 import { osLoad } from "../os/load.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { MAX_PRIORITY } from "../../domain/queues.ts";
@@ -50,7 +50,11 @@ async function main(argv: string[]): Promise<number> {
     case "stats":
       return withScope(({ coordinator }) => print(formatStats(coordinator.stats(wholeNumber(rest[0], 7, "days") * DAY))));
     case "interrupted":
-      return withScope(({ coordinator }) => print(formatInterrupted(coordinator.interrupted(wholeNumber(rest[0], 24, "hours") * 3_600_000))));
+      // A crashed session counts as left only once something drops it; with no session running, nothing else will.
+      return withScope(async ({ coordinator }) => {
+        await coordinator.prune("");
+        return print(formatInterrupted(coordinator.interrupted(wholeNumber(rest[0], 24, "hours") * 3_600_000)));
+      });
     case "notes":
       return withScope(({ coordinator }) => print(formatNotes(coordinator.notes(wholeNumber(rest[0], 20, "count")))));
     case "note":
@@ -161,10 +165,27 @@ async function run(args: string[]): Promise<number> {
   const timeoutMs = values.timeout === undefined ? undefined : parseDuration(values.timeout);
   const command = args.slice(split + 1);
 
+  // Signals to the runner go to the command: it runs in its own process group (so a time limit can stop all of it),
+  // which the terminal's Ctrl-C no longer reaches.
+  let stopping: NodeJS.Signals | undefined;
+  let forward: (signal: NodeJS.Signals) => void = () => undefined;
+  for (const s of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.on(s, signal => {
+      stopping = signal;
+      forward(signal);
+    });
+  }
+  const attach = (f: (signal: NodeJS.Signals) => void) => {
+    forward = f;
+    if (stopping) f(stopping);
+  };
+
   // A command that already holds a slot of this queue runs nested jobs of the same queue at once: waiting for a
   // second slot of a one-slot queue would wait for itself forever.
   if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) {
-    return (await spawnCommand(command, process.env, timeoutMs ?? null, () => undefined)).code;
+    const { code, timedOut } = await spawnCommand(command, commandEnv({}), timeoutMs ?? null, attach);
+    if (timedOut) console.error(`omp-coord: stopped after the time limit`);
+    return timedOut ? EXIT_TIMED_OUT : code;
   }
 
   return withScope(async ({ config, store, dir }) => {
@@ -176,15 +197,6 @@ async function run(args: string[]): Promise<number> {
     mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
     const id = randomBytes(4).toString("hex");
     const address = join(dir, "s", `job-${id}.sock`);
-
-    let stopping: NodeJS.Signals | undefined;
-    let forward: (signal: NodeJS.Signals) => void = () => undefined;
-    for (const s of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-      process.on(s, signal => {
-        stopping = signal;
-        forward(signal);
-      });
-    }
 
     return runJob(
       {
@@ -209,10 +221,7 @@ async function run(args: string[]): Promise<number> {
         stopRequested: () => (stopping ? 128 + signalNumber(stopping) : undefined),
         report: line => console.error(line),
         execute: limit =>
-          spawnCommand(command, { ...process.env, OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }, limit, f => {
-            forward = f;
-            if (stopping) f(stopping);
-          }),
+          spawnCommand(command, commandEnv({ OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }), limit, attach),
       },
     );
   });
@@ -234,10 +243,19 @@ function parseRunFlags(args: string[]) {
 }
 
 /**
- * Runs the command with the terminal's input and output and returns its exit status (128 + signal number when a
- * signal ended it). With a time limit, sends SIGTERM when it passes and SIGKILL 10 s later. `onStart` receives a
- * function that passes a signal on to it. Ctrl-C at a terminal already reaches the command (the terminal signals the
- * whole process group), so SIGINT is passed on only without one.
+ * The command's environment: the runner's, minus `BUN_BE_BUN` (set when omp's binary runs this file as Bun; a
+ * command that starts `omp` must get omp), plus `extra`.
+ */
+function commandEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  const { BUN_BE_BUN: _, ...env } = process.env;
+  return { ...env, ...extra };
+}
+
+/**
+ * Runs the command in its own process group with the terminal's input and output, and returns its exit status
+ * (128 + signal number when a signal ended it). `onStart` receives a function that passes a signal to the whole
+ * group. With a time limit, the group gets SIGTERM when it passes; whatever of it is still running 10 s later
+ * (`sh -c 'a && b'` exits on SIGTERM while `a` may not) gets SIGKILL before the slot is given back.
  */
 async function spawnCommand(
   command: string[],
@@ -245,25 +263,31 @@ async function spawnCommand(
   timeoutMs: number | null,
   onStart: (forward: (signal: NodeJS.Signals) => void) => void,
 ): Promise<{ code: number; timedOut: boolean }> {
-  const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env });
-  onStart(signal => {
-    if (signal === "SIGINT" && process.stdin.isTTY) return;
-    child.kill(signal);
-  });
-  let timedOut = false;
-  let killer: ReturnType<typeof setTimeout> | undefined;
+  const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env, detached: true });
+  const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch {
+      return false; // the group is gone
+    }
+  };
+  onStart(signalGroup);
+  let termAt: number | undefined;
   const limit =
     timeoutMs === null
       ? undefined
       : setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGTERM");
-          killer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+          termAt = Date.now();
+          signalGroup("SIGTERM");
         }, timeoutMs);
   const exitCode = await child.exited;
   clearTimeout(limit);
-  clearTimeout(killer);
-  return { code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode, timedOut };
+  if (termAt !== undefined) {
+    while (signalGroup(0) && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
+    signalGroup("SIGKILL");
+  }
+  return { code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode, timedOut: termAt !== undefined };
 }
 
 function signalNumber(signal: NodeJS.Signals): number {

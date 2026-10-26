@@ -11,7 +11,7 @@ An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord`
 
 ## Layout: hexagonal, around a functional core
 
-Dependencies point inward only: adapters → app → domain. The domain imports nothing outside itself; the app imports only the domain and its own ports.
+Dependencies point inward only: adapters → app → domain. The domain imports nothing outside itself, except `node:path`'s pure path arithmetic in `claims.ts`; the app imports only the domain and its own ports. Facts about the machine (the home folder, which folders are worktree roots) are passed in by adapters.
 
 | Path | Role |
 |---|---|

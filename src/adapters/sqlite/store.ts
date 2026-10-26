@@ -331,7 +331,7 @@ export class BoardStore implements BoardRepository {
         .all()
         .map(r => ({ sessionId: r.session_id, agentId: r.agent_id, from: r.from_port, to: r.to_port })),
       load: db.query<{ value: number; at: number }, []>("SELECT value, at FROM machine_load").get() ?? undefined,
-      // The most recent notes only: older ones stay in the table for `/coord notes all` and SQL.
+      // The most recent notes only: older ones stay in the table, for SQL, until history retention drops them.
       notes: db
         .query<{ id: number; at: number; label: string | null; author: string; text: string }, []>(
           `SELECT * FROM (SELECT * FROM notes ORDER BY id DESC LIMIT ${NOTES_LOADED}) ORDER BY id`,

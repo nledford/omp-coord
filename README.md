@@ -37,10 +37,10 @@ omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <te
 omp-coord pause [reason…] | resume | doctor [--fix]
 ```
 
-- `run` waits for a slot of `<queue>`, runs the command with the terminal's input and output, and exits with the command's exit code. Ctrl-C while waiting leaves the line; while running, it is passed to the command.
+- `run` waits for a slot of `<queue>`, runs the command with the terminal's input and output, and exits with the command's exit code. The command runs in its own process group, so a time limit stops everything it started. Ctrl-C while waiting leaves the line; while running, it is passed to the command.
 - **Lanes**: `--lane` picks one of the queue's `lanes`; earlier lanes go first. Without it, the job goes in the last lane.
 - **Duplicates**: jobs with the same `--key` (for example `"<checkout> ci"`) are duplicates. One that duplicates a running job is refused; one that duplicates a waiting job is refused or, with `onDuplicate: "supersede"`, replaces it in its place in line.
-- **Exit codes**: the command's own, `75` when the job was not run (a refused or superseded duplicate), `2` for a usage or configuration error.
+- **Exit codes**: the command's own, `75` when the job was not run (a refused or superseded duplicate), `124` when its time limit stopped it, `2` for a usage or configuration error.
 - **Owner**: jobs belong to the omp session in `OMP_COORD_SESSION` (set by the extension, so commands an agent runs inherit it) or `--owner`; otherwise to no session ("outside omp").
 - **Order** (per queue): `fifo`, oldest first; `fair-share`, owners take turns (the one served longest ago goes next), and within one owner higher `priority` goes first, so priority never lets a session jump another; `priority`, higher priority first across everyone. With `agingMinutes`, each that many minutes of waiting adds 1 to a job's priority, so no job waits forever behind others *in its lane*. Lanes are strict: steady front-lane traffic keeps the normal lane waiting.
 - Agents reorder their own session's waiting jobs with `coord_job_priority`. Priorities run from -1,000,000 to 1,000,000.
@@ -101,7 +101,7 @@ The extension stays inactive in a session unless it finds a `.omp-coord.json` in
 | `queues.<name>.lanes` | `["normal"]` | Lane names, first served first; the last is the default. |
 | `queues.<name>.agingMinutes` | none | Waiting this long adds 1 to a job's priority. |
 | `queues.<name>.onDuplicate` | `"refuse"` | `"refuse"` or `"supersede"` a waiting job with the same key. |
-| `queues.<name>.timeoutMinutes` | none | Stop a job's command after this long (SIGTERM, then SIGKILL 10 s later); it exits 124. `--timeout` overrides it per job. |
+| `queues.<name>.timeoutMinutes` | none | Stop a job's command after this long: SIGTERM to its process group, then SIGKILL to whatever of it is left 10 s later; it exits 124. `--timeout` overrides it per job. |
 | `queues.<name>.loadSlots` | `[]` | `[{ "above": 150, "slots": 1 }]`: fewer slots under load; `0` holds the queue. |
 | `resources.ports` | none | `{ "from", "to", "perSession", "perAgent" (10) }`: each session gets a block of `perSession` ports, each agent a block of `perAgent` from its session's. |
 | `resources.scratch` | none | Root of the scratch folders: `<scratch>/<letter>` per session, `<scratch>/<letter>/<agent id>` per agent. Relative to the config file. |
@@ -125,9 +125,11 @@ Agents get the tools `coord_status`, `coord_send` (main session only), `coord_cl
 
 Messages arrive as `[omp-coord] Message from omp session A …`, marked as coming from another session rather than from the user. A message for a subagent that is not running goes to its main session, which can pass it on with `write agent://<id>`.
 
-**Claims are a guard against mistakes, not a lock.** They match command text: a git command that changes a claimed worktree (run in it, after `cd` into it, or with `git -C`), a git command that changes a branch named in it (push, checkout, rebase, reset, …), or a `gh pr` command that changes a claimed PR (edit, comment, merge, …). Reading commands always pass, and so does anything written to dodge the patterns.
+**Claims are a guard against mistakes, not a lock.** They match command text: a git command that changes a claimed worktree (run in it, after `cd` into it, or with `git -C`; a worktree nested inside a claimed checkout is its own), a git command that changes a branch named in it (push, force-push with `+`, checkout, rebase, reset, …; commit messages do not count), or a gh command that changes a claimed PR (`gh pr edit`, `comment`, `merge`, … with the number or URL anywhere, and `gh api` writes to `pulls/N` or `issues/N`). Reading commands always pass, and so does anything written to dodge the patterns.
 
-**After a crash**, `/coord interrupted` (or `omp-coord interrupted`) lists, per session that left, the agents that were mid-run and the folder the session ran in. omp keeps their transcripts; revive each from a session in that folder with `write agent://<id>`.
+**Pausing keeps everyone's place.** A slot held for a session when the pause starts stays held, and on resume each held slot gets its full hold time again.
+
+**After a crash**, `/coord interrupted` (or `omp-coord interrupted`, which first drops sessions whose process is gone) lists, per session that left, the agents that were mid-run and the folder the session ran in. omp keeps their transcripts; revive each from a session in that folder with `write agent://<id>`.
 
 ## State and event log
 

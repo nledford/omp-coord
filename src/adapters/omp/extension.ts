@@ -10,7 +10,8 @@
  * one registration, and every binding is kept so a message can reach the subagent it is for.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
@@ -143,7 +144,14 @@ export default function ompCoord(pi: ExtensionAPI): void {
 
     try {
       const cwd = typeof event.input.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
-      const held = rt.coordinator.checkCommand({ sessionId: rt.sessionId, command, cwd });
+      const held = rt.coordinator.checkCommand({
+        sessionId: rt.sessionId,
+        command,
+        cwd,
+        home: homedir(),
+        // A worktree's top folder holds `.git` (a folder in the main checkout, a file in linked worktrees).
+        isWorktreeRoot: dir => existsSync(join(dir, ".git")),
+      });
       if (held) {
         const holder = rt.coordinator.board().sessions.find(s => s.id === held.sessionId)?.label ?? "?";
         return {
@@ -395,6 +403,9 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   );
   if (differing.length) {
     notify(rt, `omp-coord: sessions ${differing.join(", ")} read a different .omp-coord.json than ${config.source}; their caps and rules differ from this session's.`, "warning");
+  }
+  if (config.resources.ports && !me?.ports) {
+    notify(rt, "omp-coord: every block of resources.ports is held by other sessions, so this session and its agents get no ports.", "warning");
   }
 }
 

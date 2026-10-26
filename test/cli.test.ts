@@ -100,11 +100,15 @@ describe("omp-coord run", () => {
     expect(await run("run", "heavy", "--", "sh", "-c", "kill -SEGV $$").exited).toBe(128 + 11);
   });
 
-  test("a command past its time limit is stopped, exits 124, and is counted as timed out", async () => {
-    const { run } = scope({ heavy: { slots: 1 } });
-    const started = Date.now();
-    expect(await run("run", "heavy", "--timeout", "1s", "--", "sleep", "30").exited).toBe(124);
-    expect(Date.now() - started).toBeLessThan(10_000);
+  test("a command past its time limit is stopped with everything it started, exits 124, and is counted as timed out", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    const leftover = join(root, "grandchild-ran");
+    const began = Date.now();
+    // The outer `sh` exits on SIGTERM at once; the inner one, its child, would go on to write the file 3 s later.
+    expect(await run("run", "heavy", "--timeout", "1s", "--", "sh", "-c", `sh -c 'sleep 3; touch ${leftover}'; true`).exited).toBe(124);
+    expect(Date.now() - began).toBeLessThan(10_000);
+    await Bun.sleep(3_500);
+    expect(existsSync(leftover)).toBe(false);
     expect(await new Response(run("stats").stdout).text()).toMatch(/heavy: 1 started.*1 failed \(1 timed out\)/);
   }, 20_000);
 
