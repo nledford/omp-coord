@@ -1,8 +1,9 @@
 # On a version tag (vX.Y.Z), pushed by `just release-publish`: check that the tag names a commit on main whose
-# version files and changelog match it, run the checks, publish the npm package @nledford/omp-coord to GitHub
-# Packages, then create the GitHub release with the changelog entry as its notes. A GitHub release therefore always
-# has its package. Re-running is safe: a version already in GitHub Packages is not published again (published
-# versions cannot be replaced), and `gh release create` fails rather than replace an existing release.
+# version files and changelog match it, run the checks, publish the npm package @nledford/omp-coord to npmjs.com
+# (trusted publishing: no stored token, provenance attached) and to GitHub Packages, then create the GitHub release
+# with the changelog entry as its notes. A GitHub release therefore always has both packages. Re-running is safe: a
+# version already in a registry is not published again (published versions cannot be replaced), and
+# `gh release create` fails rather than replace an existing release.
 name: Release
 
 on:
@@ -32,7 +33,38 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
 
-  publish:
+  publish-npm:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # trusted publishing: npm exchanges the job's OIDC token for a one-time publish token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Publish to npmjs.com, unless this version is there already
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          registry=https://registry.npmjs.org
+          node -e 'const v = process.argv[1], [a, b, c] = v.split(".").map(Number); if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) { console.error("npm " + v + " is older than 11.5.1, which trusted publishing needs"); process.exit(1); }' "$(npm --version)"
+          if [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ]; then
+            echo "@nledford/omp-coord@$version is already on npmjs.com"
+            exit 0
+          fi
+          npm publish --access public --registry "$registry"
+          for _ in 1 2 3 4 5 6; do
+            [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ] && exit 0
+            sleep 10
+          done
+          echo "npmjs.com does not serve @nledford/omp-coord@$version a minute after publishing"; exit 1
+
+  publish-github:
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -47,18 +79,18 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           version="${TAG#v}"
+          registry=https://npm.pkg.github.com
           published=$(gh api --paginate "/users/$GITHUB_REPOSITORY_OWNER/packages/npm/omp-coord/versions" --jq '.[].name' 2>/dev/null) || published=""
           if grep -qxF "$version" <<<"$published"; then
             echo "@nledford/omp-coord@$version is already published"
             exit 0
           fi
           printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_TOKEN" > "$RUNNER_TEMP/.npmrc"
-          npm publish --userconfig "$RUNNER_TEMP/.npmrc"
-          # The registry serves what was just published (publishConfig applies to publish only, so name the registry).
-          test "$(npm view "@nledford/omp-coord@$version" version --registry https://npm.pkg.github.com --userconfig "$RUNNER_TEMP/.npmrc")" = "$version"
+          npm publish --registry "$registry" --userconfig "$RUNNER_TEMP/.npmrc"
+          test "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" --userconfig "$RUNNER_TEMP/.npmrc")" = "$version"
 
   release:
-    needs: [check, publish]
+    needs: [check, publish-npm, publish-github]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

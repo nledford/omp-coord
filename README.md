@@ -1,7 +1,7 @@
 # omp-coord
 
 [![CI](https://github.com/nledford/omp-coord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nledford/omp-coord/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/nledford/omp-coord)](https://github.com/nledford/omp-coord/releases/latest)
+[![npm](https://img.shields.io/npm/v/@nledford/omp-coord)](https://www.npmjs.com/package/@nledford/omp-coord)
 [![omp](https://img.shields.io/badge/omp-%E2%89%A5%2018.12-blue)](https://github.com/can1357/oh-my-pi)
 [![License: MIT](https://img.shields.io/github/license/nledford/omp-coord)](LICENSE)
 
@@ -21,7 +21,7 @@ Each session gets a letter and shows `coord B · work 5/8 · short 1/2` in omp's
 ## Quick start
 
 ```sh
-omp plugin install github:nledford/omp-coord
+omp plugin install @nledford/omp-coord
 ```
 
 Then put a `.omp-coord.json` in the project's top folder:
@@ -41,7 +41,7 @@ Every omp session started in that folder or below now shares 6 agent slots, and 
 
 | | |
 |---|---|
-| [Install](docs/install.md) | From GitHub, the marketplace or GitHub Packages; updating; the `omp-coord` command. |
+| [Install](docs/install.md) | From npm, GitHub, the marketplace or GitHub Packages; updating; the `omp-coord` command. |
 | [Configuration](docs/configuration.md) | Every `.omp-coord.json` field. |
 | [Agent slots](docs/agent-slots.md) | How caps, the line, holds and nested agents work. |
 | [Queues](docs/queues.md) | `omp-coord run`, order, lanes, time limits, agents' commands. |

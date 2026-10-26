@@ -2,6 +2,15 @@
 
 Requires omp 18.12 or later. No dependencies at runtime: the extension and the runner use the Bun built into omp.
 
+## From npm
+
+```sh
+omp plugin install @nledford/omp-coord
+omp plugin install @nledford/omp-coord@0.2.0   # a given release
+```
+
+Releases are published to npmjs.com from the release workflow, with [provenance](https://docs.npmjs.com/generating-provenance-statements) that ties each package to the commit and workflow that built it (from 0.2.1 on). A machine set up for GitHub Packages (below) maps the `@nledford` scope to GitHub, so this command installs from there instead.
+
 ## From GitHub
 
 ```sh
@@ -17,7 +26,7 @@ omp plugin install omp-coord@omp-coord
 
 ## From GitHub Packages
 
-Each release is also published as the npm package `@nledford/omp-coord` to GitHub Packages. GitHub Packages asks for a token to install any npm package, public ones included, so each machine needs one-time setup: a token that can read packages, and the `@nledford` scope pointed at GitHub's registry in `~/.npmrc`.
+Each release is also published to GitHub Packages. GitHub Packages asks for a token to install any npm package, public ones included, so each machine needs one-time setup: a token that can read packages, and the `@nledford` scope pointed at GitHub's registry in `~/.npmrc`.
 
 ```sh
 gh auth refresh --scopes read:packages      # once: let the GitHub CLI's token read packages
