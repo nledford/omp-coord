@@ -14,11 +14,14 @@ export type CommandDecision =
   | { kind: "queue"; queue: string; command: string };
 
 /**
- * How to start the runner (`bun <path>/cli.ts`), which session owns the jobs it queues, and the config file the
- * session's rules came from: the runner must use the same one, whatever folder the bash call runs in.
+ * How to start the runner (e.g. omp's own binary on `cli.ts` with `BUN_BE_BUN=1`), which session owns the jobs it
+ * queues, and the config file the session's rules came from: the runner must use the same one, whatever folder the
+ * bash call runs in.
  */
 export interface Runner {
   argv: string[];
+  /** Variables set for the runner only. Names must be valid shell names. */
+  env?: Record<string, string>;
   owner: string;
   config: string;
 }
@@ -31,6 +34,7 @@ export function decideCommand(rules: CommandRule[], command: string, runner: Run
   if (rule.action === "refuse") return { kind: "refuse", reason: rule.reason };
   const wrapped = [
     `OMP_COORD_CONFIG=${quote(runner.config)}`,
+    ...Object.entries(runner.env ?? {}).map(([k, v]) => `${k}=${quote(v)}`),
     ...runner.argv.map(quote),
     "run",
     quote(rule.queue),

@@ -26,6 +26,17 @@ describe("agents' bash commands", () => {
     expect(d.kind === "queue" && d.command).toContain("run 'heavy' --lane 'normal' --owner 's1'");
   });
 
+  test("the runner's environment comes first, as assignments the shell applies", async () => {
+    const d = decideCommand([{ pattern: /x/, action: "queue", queue: "q", lane: undefined }], "x", {
+      argv: ["sh", "-c", 'echo "$BUN_BE_BUN"; exit 0', "-"],
+      env: { BUN_BE_BUN: "1" },
+      owner: "s",
+      config: "/c",
+    });
+    expect(d.kind === "queue" && d.command).toStartWith("OMP_COORD_CONFIG='/c' BUN_BE_BUN='1' 'sh'");
+    expect(await Bun.$`sh -c ${d.kind === "queue" ? d.command : ""}`.text()).toBe("1\n");
+  });
+
   test("a command already going through omp-coord, or matching no rule, is left alone", () => {
     expect(decideCommand(rules, "omp-coord run test -- cargo test", runner)).toEqual({ kind: "allow" });
     expect(decideCommand(rules, "'/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts' run test -- cargo test", runner)).toEqual({ kind: "allow" });

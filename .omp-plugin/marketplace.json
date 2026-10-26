@@ -1,0 +1,19 @@
+{
+  "name": "omp-coord",
+  "owner": { "name": "Nathaniel Ledford" },
+  "metadata": { "description": "Coordination for several omp sessions on one machine" },
+  "plugins": [
+    {
+      "name": "omp-coord",
+      "source": "./",
+      "description": "Shared subagent caps, build and test queues, claims, pause, a decision log and messages across omp sessions working in one project on one machine.",
+      "version": "0.1.0",
+      "author": { "name": "Nathaniel Ledford" },
+      "homepage": "https://github.com/nledford/omp-coord",
+      "repository": "https://github.com/nledford/omp-coord",
+      "license": "MIT",
+      "keywords": ["agents", "coordination", "queues", "subagents"],
+      "category": "productivity"
+    }
+  ]
+}

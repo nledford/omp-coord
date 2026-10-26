@@ -76,7 +76,6 @@ async function main(argv: string[]): Promise<number> {
             stateDirMode: statSync(dir).mode,
             socketFiles: socketFiles(join(dir, "s")),
             cliOnPath: Bun.which("omp-coord") !== null,
-            bunOnPath: Bun.which("bun") !== null,
             now: Date.now(),
           },
           rest.includes("--fix"),

@@ -23,11 +23,11 @@ import { clock, formatFooter, formatInterrupted, formatNotes, formatStats, forma
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
 
-/** How agents' queued commands start the runner: Bun running the CLI adapter. */
-const RUNNER_ARGV = (() => {
-  const bun = Bun.which("bun");
-  return bun ? [bun, join(import.meta.dir, "..", "cli", "cli.ts")] : undefined;
-})();
+/**
+ * How agents' queued commands start the runner: the omp binary itself runs the CLI adapter as Bun
+ * (`BUN_BE_BUN=1`, as omp does for its own `bun install`), so no separate Bun install is needed.
+ */
+const RUNNER = { argv: [process.execPath, join(import.meta.dir, "..", "cli", "cli.ts")], env: { BUN_BE_BUN: "1" } };
 
 const TICK_MS = 2000;
 const PRUNE_EVERY_TICKS = 5;
@@ -155,12 +155,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
       notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
     }
 
-    if (!RUNNER_ARGV) {
-      // Without bun on PATH queued commands cannot be wrapped; only refusals apply.
-      const refused = rt.config.commands.find(r => r.action === "refuse" && r.pattern.test(command));
-      return refused?.action === "refuse" ? { block: true, reason: `omp-coord: ${refused.reason}` } : undefined;
-    }
-    const decision = decideCommand(rt.config.commands, command, { argv: RUNNER_ARGV, owner: rt.sessionId, config: rt.config.source });
+    const decision = decideCommand(rt.config.commands, command, { ...RUNNER, owner: rt.sessionId, config: rt.config.source });
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
     if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
     return undefined;

@@ -1,58 +1,44 @@
 {
-  "scope": "lightcraft",
+  "scope": "my-project",
   "agents": {
     "pools": {
-      "work": { "cap": 8, "loadCaps": [{ "above": 150, "cap": 4 }] },
+      "work": { "cap": 6, "loadCaps": [{ "above": 12, "cap": 3 }] },
       "short": { "cap": 2, "agentTypes": ["scout"] }
     },
-    "defaultPool": "work",
     "exempt": ["reviewer", "security-reviewer"],
-    "nested": { "allow": ["reviewer", "security-reviewer"], "maxRunningPerParent": 1 },
-    "holdMinutes": 5,
-    "startTimeoutSeconds": 120
+    "nested": { "allow": ["reviewer"], "maxRunningPerParent": 1 },
+    "holdMinutes": 5
   },
   "queues": {
-    "heavy": {
+    "build": {
       "slots": 2,
       "order": "fair-share",
-      "lanes": ["front", "normal"],
+      "lanes": ["urgent", "normal"],
       "agingMinutes": 15,
-      "timeoutMinutes": 120,
-      "loadSlots": [{ "above": 150, "slots": 1 }]
+      "timeoutMinutes": 60,
+      "onDuplicate": "supersede",
+      "loadSlots": [{ "above": 12, "slots": 1 }]
     },
-    "test": { "slots": 3, "order": "fair-share", "agingMinutes": 10, "timeoutMinutes": 60 }
+    "test": { "slots": 3, "order": "fair-share", "agingMinutes": 10, "timeoutMinutes": 30 }
   },
-  "resources": {
-    "ports": { "from": 18700, "to": 19999, "perSession": 200, "perAgent": 10 },
-    "scratch": "/tmp/lightcraft-scratch"
-  },
-  "messages": { "perMinute": 10 },
-  "history": { "retentionDays": 30, "maxEvents": 100000 },
   "commands": [
-    {
-      "pattern": "(^|[;&|(\\s])cargo\\s+(test|check|clippy)\\b",
-      "action": "refuse",
-      "reason": "use the recipes (just test, just test-ui, just check, just lint): they queue for a test slot and set the test config folder"
-    },
-    {
-      "pattern": "(^|[;&|(\\s])cargo\\s+xtask\\s+ci\\b",
-      "action": "refuse",
-      "reason": "use just ci: it queues for a heavy slot and writes the log"
-    },
-    {
-      "pattern": "(^|[;&|(\\s])cargo\\s+build\\b[^;&|]*--release",
-      "action": "refuse",
-      "reason": "use just build: it queues for a heavy slot"
-    },
+    { "pattern": "(^|[;&|(\\s])(npm|pnpm|yarn|bun)\\s+(run\\s+)?test\\b", "action": "queue", "queue": "test" },
+    { "pattern": "(^|[;&|(\\s])(npm|pnpm|yarn|bun)\\s+run\\s+build\\b", "action": "queue", "queue": "build" },
     {
       "pattern": "(^|[;&|(\\s])pkill\\b",
       "action": "refuse",
-      "reason": "pkill can stop other agents' builds and shells; stop only the process you started, by its PID"
+      "reason": "pkill can stop other agents' processes; stop only the process you started, by its PID"
     },
     {
       "pattern": "(^|[;&|(\\s])git\\s+(-C\\s+\\S+\\s+)?stash\\b",
       "action": "refuse",
       "reason": "stashes are shared by all worktrees: commit to a throwaway branch instead"
     }
-  ]
+  ],
+  "resources": {
+    "ports": { "from": 20000, "to": 20999, "perSession": 200, "perAgent": 10 },
+    "scratch": ".omp-coord-scratch"
+  },
+  "messages": { "perMinute": 10 },
+  "history": { "retentionDays": 30, "maxEvents": 100000 }
 }

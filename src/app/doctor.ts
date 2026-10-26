@@ -19,9 +19,8 @@ export interface DoctorFacts {
   stateDirMode: number;
   /** Socket files present in the state folder. */
   socketFiles: string[];
-  /** Whether `omp-coord` resolves on PATH, and whether `bun` does. */
+  /** Whether `omp-coord` resolves on PATH, for scripts and `just` recipes. */
   cliOnPath: boolean;
-  bunOnPath: boolean;
   now: number;
 }
 
@@ -35,8 +34,9 @@ export async function doctor(coordinator: Coordinator, liveness: Liveness, facts
       ? { level: "ok", text: "state folder is private to you" }
       : { level: "error", text: `state folder is readable by others (mode ${(facts.stateDirMode & 0o777).toString(8)}); run chmod 700 on it` },
   );
-  if (!facts.bunOnPath) out.push({ level: "warn", text: "bun is not on PATH: agents' queued commands cannot be rewritten to run through queues" });
-  if (!facts.cliOnPath) out.push({ level: "warn", text: "omp-coord is not on PATH: run `bun link` in the omp-coord folder, or call it by path" });
+  if (!facts.cliOnPath) {
+    out.push({ level: "warn", text: "omp-coord is not on PATH, so scripts cannot call it by name: run `bun link` in the omp-coord folder, or call it by path" });
+  }
 
   const board = coordinator.board();
   const differing = board.sessions.filter(s => s.configHash !== config.hash);

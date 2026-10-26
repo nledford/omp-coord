@@ -55,24 +55,30 @@ A runner that dies (crash, `kill -9`) loses its slot within about 10 seconds: ev
 
 A command that puts its work in the background (`cargo test &`) holds the slot only until the shell exits, so the background work runs unqueued.
 
-When an agent's bash command matches a `queue` rule, the extension rewrites it to `omp-coord run <queue> --owner <session> -- sh -c '<command>'`. The waiting happens inside the bash call, which counts against the bash tool's timeout: agents should run long jobs as background (`async`) bash calls. The rewritten command runs in `sh`, so shell variables the agent set earlier without exporting them are not visible to it.
+When an agent's bash command matches a `queue` rule, the extension rewrites it to run `omp-coord run <queue> --owner <session> -- sh -c '<command>'` with omp's own binary as Bun (`BUN_BE_BUN=1`), so it needs no separate Bun install. The waiting happens inside the bash call, which counts against the bash tool's timeout: agents should run long jobs as background (`async`) bash calls. The rewritten command runs in `sh`, so shell variables the agent set earlier without exporting them are not visible to it.
 
 ## Install
 
-Requires omp 18.12 or later and Bun on `PATH` (the extension runs inside omp's Bun runtime; the runner runs with `bun`). No dependencies at runtime.
+Requires omp 18.12 or later. No dependencies at runtime: the extension and the runner use the Bun built into omp.
 
-Load it for every session, in `~/.omp/agent/config.yml`:
+From GitHub (the repository is private for now, so this needs access to it):
 
-```yaml
-extensions:
-  - /path/to/omp-coord/src/index.ts
+```sh
+omp plugin install github:nledford/omp-coord
 ```
 
-or for one run: `omp -e /path/to/omp-coord/src/index.ts`.
+or through omp's marketplace, which this repository also serves:
 
-Put the runner on `PATH` with `bun link` in this folder (it installs `omp-coord` into `~/.bun/bin`), or call `bun /path/to/omp-coord/src/adapters/cli/cli.ts`.
+```
+/marketplace add nledford/omp-coord
+/marketplace install omp-coord@omp-coord
+```
 
-The extension stays inactive in a session unless it finds a `.omp-coord.json` in the session's folder or a parent folder (so every worktree below a checkout uses the checkout's file), or the file named by `OMP_COORD_CONFIG`.
+From a checkout, link it instead: `omp plugin install /path/to/omp-coord`, or load it for one run with `omp -e /path/to/omp-coord/src/index.ts`.
+
+The `omp-coord` command for scripts and terminals: `bun link` in the checkout puts it on `PATH` (`~/.bun/bin`). Without Bun, call it through omp: `BUN_BE_BUN=1 omp /path/to/omp-coord/src/adapters/cli/cli.ts <subcommand>`.
+
+The extension stays inactive in a session unless it finds a `.omp-coord.json` in the session's folder or a parent folder (so every worktree below a checkout uses the checkout's file), or the file named by `OMP_COORD_CONFIG`. Run `omp-coord doctor` in the project to check the setup.
 
 ## Configuration
 
