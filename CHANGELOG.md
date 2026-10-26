@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- On Linux, where `/proc` cannot be read (some hardened containers), a timed-out job now falls back to signalling its process group instead of failing.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added

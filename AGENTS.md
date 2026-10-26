@@ -45,7 +45,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/config.ts` | Finds and validates `.omp-coord.json` into domain policy types, and hashes it. Errors name the field. |
 | `src/adapters/sqlite/store.ts` | `BoardRepository` on SQLite: state tables, the event log, the decision log, schema version, retention. |
 | `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
-| `src/adapters/os/load.ts` | `LoadProbe` from the 1-minute load average. |
+| `src/adapters/os/load.ts`, `process-group.ts` | `LoadProbe` from the 1-minute load average; whether a timed-out job's process group still has a running member (zombies do not count). |
 | `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run. Keeps each subagent's binding to deliver messages to it. |
 | `src/adapters/cli/cli.ts` | `omp-coord` subcommands: argument parsing, signals, time limits and process spawning around the use cases; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for a queued command. |
 | `src/adapters/text/report.ts` | Text for `/coord`, the tools, the `omp-coord` subcommands and the footer. |
@@ -82,5 +82,5 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 
 ## Tests
 
-- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/features.test.ts`: pause, load limits, claims, notes, ports, subagent messages and event-log reports. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check, round-trips) and socket liveness. `test/cli.test.ts`: the CLI across real processes (waiting, exit codes, duplicates, a killed runner, time limits, pause, doctor). `test/release.test.ts`: version arithmetic and the changelog cut in `scripts/release.ts`.
+- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/features.test.ts`: pause, load limits, claims, notes, ports, subagent messages and event-log reports. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check, round-trips) and socket liveness. `test/cli.test.ts`: the CLI across real processes (waiting, exit codes, duplicates, a killed runner, time limits, pause, doctor). `test/release.test.ts`: version arithmetic and the changelog cut in `scripts/release.ts`. `test/process-group.test.ts`: reading `/proc/<pid>/stat` and telling a running process group from one of zombies.
 - Tests that need several processes spawn `bun` children; keep them, they are the evidence that processes don't lose each other's writes or slots.
