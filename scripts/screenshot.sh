@@ -4,8 +4,9 @@
 #   scripts/screenshot.sh <tmux-target> <out.png> [first-line [last-line]]
 #
 # Needs tmux, freeze (brew install charmbracelet/tap/freeze), resvg (brew install resvg) and the JetBrains Mono Nerd
-# Font (brew install --cask font-jetbrains-mono-nerd-font) for omp's status-line icons. The machine's host name is
-# replaced with "demo-mac". Lines are 1-based and inclusive; by default the whole visible pane is rendered.
+# Font (brew install --cask font-jetbrains-mono-nerd-font) for omp's status-line icons. Every form of the machine's
+# name becomes "demo-mac", the home folder "~" and the user name "demo"; still look at the image before committing it.
+# Lines are 1-based and inclusive; by default the whole visible pane is rendered.
 set -euo pipefail
 
 target=${1:?usage: screenshot.sh <tmux-target> <out.png> [first-line [last-line]]}
@@ -22,9 +23,24 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# One sed expression per non-empty value, longest first (so "name.local" goes before "name"), with regex characters
+# escaped.
+redactions=()
+add() {
+  local value=$1 replacement=$2
+  [ -n "$value" ] || return 0
+  redactions+=(-e "s/$(printf '%s' "$value" | sed 's/[][\.*^$/]/\\&/g')/$replacement/g")
+}
+add "$HOME" "~"
+while IFS= read -r name; do add "$name" demo-mac; done < <(
+  { hostname; hostname -s; scutil --get ComputerName; scutil --get LocalHostName; } 2>/dev/null |
+    awk 'NF && !seen[$0]++ { print length($0) "\t" $0 }' | sort -rn | cut -f2-
+)
+add "$(id -un)" demo
+
 tmux capture-pane -e -p -t "$target" |
   sed -n "${first},${last}p" |
-  sed "s/$(hostname -s)/demo-mac/g" >"$work/pane.ansi"
+  sed "${redactions[@]}" >"$work/pane.ansi"
 
 # freeze's own PNG output drops fonts it embeds, so it writes an SVG naming the font and resvg draws it.
 freeze "$work/pane.ansi" --language ansi --output "$work/pane.svg" \
