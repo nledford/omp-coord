@@ -4,29 +4,36 @@ An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord`
 
 ## Commands
 
-- `bun install`, then `bun run check` (typecheck and tests). Run it before every commit.
-- Load a working copy into omp: `OMP_COORD_STATE_DIR=/tmp/<scratch>/state omp --no-extensions -e "$PWD/src/index.ts"` from a folder holding a scratch `.omp-coord.json`. Never point `OMP_COORD_STATE_DIR` at the real `~/.omp/run/omp-coord` while testing.
-- Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool. Read the board with `sqlite3 <state>/<scope>.db`.
+- `just` lists the workflows. `just install`, then `just check` (typecheck and every test) before every commit; `just test <file>` or `just test -t <pattern>` while iterating.
+- Load a working copy into omp: `just omp-dev` (scratch state folder; run it from a folder holding a scratch `.omp-coord.json`). Never point `OMP_COORD_STATE_DIR` at the real `~/.omp/run/omp-coord` while testing. `just events <scope>` reads that scratch board's event log.
+- Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool.
+- `src/` changes that move the CLI need `just unlink && just link` so `~/.bun/bin/omp-coord` follows.
 
-## Layout
+## Layout: hexagonal, around a functional core
+
+Dependencies point inward only: adapters → app → domain. The domain imports nothing outside itself; the app imports only the domain and its own ports.
 
 | Path | Role |
 |---|---|
-| `src/domain/board.ts` | The rules for sessions, agent slots, the line and messages: pure transitions over a plain `Board`. No I/O, no clock; callers pass `now`. Transitions append `BoardEvent`s to `board.events`. |
-| `src/domain/queues.ts` | The rules for build/test queues on the same `Board`: lanes, the three orders, duplicates, scheduling. |
-| `src/commands.ts` | Decides what happens to an agent's bash command: allow, refuse, or rewrite to run through a queue. |
-| `src/config.ts` | Finds and validates `.omp-coord.json`. Errors name the field. |
-| `src/infra/store.ts` | SQLite: state tables, the event log, schema version (`PRAGMA user_version`), retention. |
-| `src/infra/beacon.ts` | One Unix socket per live session or queued job; a process that cannot connect knows the other is gone. |
-| `src/extension.ts` | The omp adapter: hooks, tools, `/coord`, the 2 s tick that delivers messages and holds and prunes dead sessions and jobs. Sets `OMP_COORD_SESSION` so runners started from the session's bash calls are its own. |
-| `src/cli.ts` | `omp-coord run` and `omp-coord status`: waits for a queue slot, runs the command, passes on its exit code; sets `OMP_COORD_JOB` for the command. |
-| `src/omp-api.ts` | The slice of omp's extension API used here, declared locally (see below). |
-| `src/report.ts` | Text for `/coord`, `coord_status`, `omp-coord status` and the footer. |
+| `src/domain/model.ts` | The `Board` (sessions, agent slots, the line, messages, jobs), policy types, `BoardEvent` and `emit`. |
+| `src/domain/sessions.ts`, `agents.ts`, `messages.ts`, `queues.ts` | Pure transitions over the `Board`, one concern each. No I/O, no clock; callers pass `now`. Transitions append `BoardEvent`s. |
+| `src/domain/commands.ts` | Decides what happens to an agent's bash command: allow, refuse, or rewrite to run through a queue. |
+| `src/app/ports.ts` | What the app needs from outside: `BoardRepository`, `Liveness`, `Listener`, `Clock`. |
+| `src/app/coordinator.ts` | Session use cases: join, leave, tick, spawn decisions, agent runs, messages, job priority, pruning dead sessions and jobs. |
+| `src/app/job-runner.ts` | The runner use case: join a queue, wait (dropping dead runners), run, leave with the exit code. |
+| `src/config.ts` | Finds and validates `.omp-coord.json` into domain policy types. Errors name the field. |
+| `src/adapters/sqlite/store.ts` | `BoardRepository` on SQLite: state tables, the event log, schema version, retention. |
+| `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
+| `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION` so runners started from the session's bash calls are its own. |
+| `src/adapters/cli/cli.ts` | `omp-coord run` and `status`: argument parsing, signals and process spawning around `runJob`; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for the command. |
+| `src/adapters/text/report.ts` | Text for `/coord`, `coord_status`, `omp-coord status` and the footer. |
+
+New behavior goes in the domain (rules) and the app (use cases), with tests there; adapters only translate. Test the app with the fakes in `test/support/fakes.ts`.
 
 ## Invariants
 
-- Every board change goes through `BoardStore.transact`: load, pure transition, save state, append events, in one `BEGIN IMMEDIATE` transaction. Never write the tables any other way; several omp processes share them.
-- Domain rules live in `board.ts` and are tested there without SQL. The store only maps rows to and from `Board`.
+- Every board change goes through `BoardRepository.transact`: load, pure transition, save state, append events, in one `BEGIN IMMEDIATE` transaction. Never write the tables any other way; several omp processes share them.
+- Domain rules are tested in the domain without SQL. The store only maps rows to and from `Board`.
 - The schema is still version 1 and may change freely: the plugin has no real-world users yet, so edit `SCHEMA` in `store.ts` in place and delete old scratch databases. Once it has users, a schema change bumps `SCHEMA_VERSION` and adds a migration step that keeps the `events` table (board state is short-lived and may be dropped).
 - The event log never stores message text.
 - No runtime dependencies: Bun built-ins only (`bun:sqlite`, `Bun.listen`). Dev dependencies are fine.
@@ -52,5 +59,5 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 
 ## Tests
 
-- `test/board.test.ts`: rules and event log. `test/queues.test.ts`: queue rules. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/infra.test.ts`: store (concurrency across processes, constraints, retention, schema check) and liveness. `test/cli.test.ts`: the runner across real processes (waiting, exit codes, duplicates, a killed runner).
+- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check) and socket liveness. `test/cli.test.ts`: the runner across real processes (waiting, exit codes, duplicates, a killed runner).
 - Tests that need several processes spawn `bun` children; keep them, they are the evidence that processes don't lose each other's writes or slots.

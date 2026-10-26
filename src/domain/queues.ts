@@ -9,9 +9,9 @@
  *
  * With `agingMs`, every `agingMs` of waiting adds 1 to a job's priority, so a low-priority job cannot wait forever
  * behind others in its lane. Lanes are strict: an earlier lane always goes first.
- * Pure transitions over the shared `Board`, like `board.ts`.
+ * Pure transitions over the shared `Board` (`model.ts`).
  */
-import { type Board, type Job, emit } from "./board.ts";
+import { type Board, type Job, emit } from "./model.ts";
 
 /** Priorities run from -MAX_PRIORITY to MAX_PRIORITY. */
 export const MAX_PRIORITY = 1_000_000;

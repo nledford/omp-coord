@@ -5,7 +5,7 @@
   "description": "omp extension and CLI: shared subagent caps, build and test queues, and messages across omp sessions on one machine",
   "type": "module",
   "main": "src/index.ts",
-  "bin": { "omp-coord": "src/cli.ts" },
+  "bin": { "omp-coord": "src/adapters/cli/cli.ts" },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",

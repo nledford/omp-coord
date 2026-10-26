@@ -1,6 +1,7 @@
 /** Plain-text status of the board, for `/coord`, the `coord_status` tool, `omp-coord status` and the footer. */
-import { type AgentPolicy, type Board, labelOf, used } from "./domain/board.ts";
-import { type Queues, orderWaiting } from "./domain/queues.ts";
+import { used } from "../../domain/agents.ts";
+import { type AgentPolicy, type Board, labelOf } from "../../domain/model.ts";
+import { type Queues, orderWaiting } from "../../domain/queues.ts";
 
 export function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

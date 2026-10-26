@@ -17,16 +17,14 @@ import { mkdirSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { type Config, ConfigError, findConfigFile, loadConfig } from "./config.ts";
-import { MAX_PRIORITY, dropJobs, enqueueJob, jobEnded, positionOf, schedule } from "./domain/queues.ts";
-import { type Beacon, isAlive, startBeacon } from "./infra/beacon.ts";
-import { BoardStore, stateDir } from "./infra/store.ts";
-import { formatQueues } from "./report.ts";
+import { runJob } from "../../app/job-runner.ts";
+import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
+import { MAX_PRIORITY } from "../../domain/queues.ts";
+import { BoardStore, stateDir } from "../sqlite/store.ts";
+import { formatQueues } from "../text/report.ts";
+import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 
-export const EXIT_NOT_RUN = 75;
 const EXIT_USAGE = 2;
-const POLL_MS = 1000;
-const LIVENESS_EVERY_POLLS = 5;
 
 class UsageError extends Error {}
 
@@ -73,106 +71,56 @@ async function run(args: string[]): Promise<number> {
 
   // A command that already holds a slot of this queue runs nested jobs of the same queue at once: waiting for a
   // second slot of a one-slot queue would wait for itself forever.
-  if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) return runCommand(command, process.env, () => undefined);
+  if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) return spawnCommand(command, process.env, () => undefined);
 
   const { config, store, dir } = openScope();
-  const policy = Object.hasOwn(config.queues, queue) ? config.queues[queue] : undefined;
-  if (!policy) {
-    store.close();
-    throw new UsageError(`omp-coord run: no queue "${queue}" in ${config.source} (${Object.keys(config.queues).join(", ") || "none"})`);
-  }
-  if (values.lane !== undefined && !policy.lanes.includes(values.lane)) {
-    store.close();
-    throw new UsageError(`omp-coord run: no lane "${values.lane}" in queue ${queue} (${policy.lanes.join(", ")})`);
-  }
-
-  mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
-  const id = randomBytes(4).toString("hex");
-  const socketPath = join(dir, "s", `job-${id}.sock`);
-  let beacon: Beacon = startBeacon(socketPath);
   try {
-    const request = {
-      id,
-      queue,
-      owner: values.owner || process.env.OMP_COORD_SESSION || null,
-      ...(values.lane === undefined ? {} : { lane: values.lane }),
-      priority,
-      ...(values.key === undefined ? {} : { key: values.key }),
-      command: command.join(" "),
-      socket: socketPath,
-      pid: process.pid,
-    };
+    const policy = Object.hasOwn(config.queues, queue) ? config.queues[queue] : undefined;
+    if (!policy) throw new UsageError(`omp-coord run: no queue "${queue}" in ${config.source} (${Object.keys(config.queues).join(", ") || "none"})`);
+    if (values.lane !== undefined && !policy.lanes.includes(values.lane)) {
+      throw new UsageError(`omp-coord run: no lane "${values.lane}" in queue ${queue} (${policy.lanes.join(", ")})`);
+    }
+    mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
+    const id = randomBytes(4).toString("hex");
+    const address = join(dir, "s", `job-${id}.sock`);
 
     let stopping: NodeJS.Signals | undefined;
     let forward: (signal: NodeJS.Signals) => void = () => undefined;
-    const onSignal = (signal: NodeJS.Signals) => {
-      stopping = signal;
-      forward(signal);
-    };
-    for (const s of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(s, onSignal);
-    const leave = (exitCode: number | null) => store.transact(b => jobEnded(b, config.queues, { id, exitCode, now: Date.now() }));
-
-    const queued = store.transact(b => enqueueJob(b, config.queues, { ...request, now: Date.now() }));
-    if (!queued.ok) {
-      console.error(`omp-coord: ${queued.reason}`);
-      return EXIT_NOT_RUN;
-    }
-
-    // Wait for a slot.
-    const since = Date.now();
-    let said = -1;
-    for (let poll = 0; ; poll++) {
-      if (stopping) {
-        leave(null);
-        return 128 + signalNumber(stopping);
-      }
-      if (poll % LIVENESS_EVERY_POLLS === LIVENESS_EVERY_POLLS - 1) {
-        const others = store.read().jobs.filter(j => j.id !== id);
-        const alive = await Promise.all(others.map(j => isAlive(j.socket)));
-        const dead = others.filter((_, i) => !alive[i]).map(j => j.id);
-        if (dead.length) store.transact(b => dropJobs(b, config.queues, dead, Date.now()));
-      }
-      // The time is read inside the transaction: fair share compares it with other runners' turns.
-      const mine = store.transact(b => {
-        const now = Date.now();
-        schedule(b, config.queues, now);
-        const job = b.jobs.find(j => j.id === id);
-        return { state: job?.state, position: positionOf(b, config.queues, id, now), running: b.jobs.filter(j => j.queue === queue && j.state === "running").length };
+    for (const s of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+      process.on(s, signal => {
+        stopping = signal;
+        forward(signal);
       });
-      if (mine.state === "running") break;
-      if (mine.state === "superseded") {
-        console.error("omp-coord: a newer job with the same key replaced this one; not running it");
-        leave(null);
-        return EXIT_NOT_RUN;
-      }
-      if (mine.state === undefined) {
-        // Another process judged this runner dead (it was unreachable for a moment) and may have removed its socket.
-        // Listen again, then join the line again.
-        beacon.stop();
-        beacon = startBeacon(socketPath);
-        const again = store.transact(b => enqueueJob(b, config.queues, { ...request, now: Date.now() }));
-        if (!again.ok) {
-          console.error(`omp-coord: ${again.reason}`);
-          return EXIT_NOT_RUN;
-        }
-        continue;
-      }
-      if (mine.position !== said) {
-        console.error(`omp-coord: waiting for a ${queue} slot: #${mine.position} in line, ${mine.running}/${policy.slots} running (job ${id})`);
-        said = mine.position;
-      }
-      await Bun.sleep(POLL_MS);
     }
-    if (said !== -1) console.error(`omp-coord: got a ${queue} slot after ${Math.round((Date.now() - since) / 1000)} s`);
 
-    const code = await runCommand(command, { ...process.env, OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }, f => {
-      forward = f;
-      if (stopping) f(stopping);
-    });
-    leave(code);
-    return code;
+    return await runJob(
+      {
+        id,
+        queue,
+        owner: values.owner || process.env.OMP_COORD_SESSION || null,
+        ...(values.lane === undefined ? {} : { lane: values.lane }),
+        priority,
+        ...(values.key === undefined ? {} : { key: values.key }),
+        command: command.join(" "),
+        pid: process.pid,
+      },
+      config.queues,
+      {
+        repo: store,
+        liveness: unixLiveness,
+        clock: Date,
+        listen: () => startBeacon(address),
+        sleep: ms => Bun.sleep(ms),
+        stopRequested: () => (stopping ? 128 + signalNumber(stopping) : undefined),
+        report: line => console.error(line),
+        execute: () =>
+          spawnCommand(command, { ...process.env, OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }, f => {
+            forward = f;
+            if (stopping) f(stopping);
+          }),
+      },
+    );
   } finally {
-    beacon.stop();
     store.close();
   }
 }
@@ -191,7 +139,7 @@ function parseRunFlags(args: string[]) {
  * signal ended it). `onStart` receives a function that passes a signal on to it. Ctrl-C at a terminal already
  * reaches the command (the terminal signals the whole process group), so SIGINT is passed on only without one.
  */
-async function runCommand(command: string[], env: NodeJS.ProcessEnv, onStart: (forward: (signal: NodeJS.Signals) => void) => void): Promise<number> {
+async function spawnCommand(command: string[], env: NodeJS.ProcessEnv, onStart: (forward: (signal: NodeJS.Signals) => void) => void): Promise<number> {
   const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env });
   onStart(signal => {
     if (signal === "SIGINT" && process.stdin.isTTY) return;

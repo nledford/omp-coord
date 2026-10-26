@@ -1,18 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  type AgentPolicy,
-  type Board,
-  agentEnded,
-  agentStarted,
-  emptyBoard,
-  expire,
-  registerSession,
-  removeSession,
-  requestSpawn,
-  sendMessage,
-  takeInbox,
-  takeNewHolds,
-} from "../src/domain/board.ts";
+import { agentEnded, agentStarted, expire, requestSpawn, takeNewHolds } from "../src/domain/agents.ts";
+import { sendMessage, takeInbox } from "../src/domain/messages.ts";
+import { type AgentPolicy, type Board, emptyBoard } from "../src/domain/model.ts";
+import { registerSession, removeSession } from "../src/domain/sessions.ts";
 
 const MIN = 60_000;
 

@@ -5,15 +5,11 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { AgentPolicy } from "./domain/board.ts";
+import type { CommandRule } from "./domain/commands.ts";
+import type { AgentPolicy } from "./domain/model.ts";
 import type { QueuePolicy, Queues } from "./domain/queues.ts";
 
 export const CONFIG_FILE = ".omp-coord.json";
-
-/** What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue. */
-export type CommandRule =
-  | { pattern: RegExp; action: "refuse"; reason: string }
-  | { pattern: RegExp; action: "queue"; queue: string; lane: string | undefined };
 
 export interface Config {
   /** Sessions share caps, the line, queues and messages only within one scope. */

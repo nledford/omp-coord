@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type Board, emptyBoard, registerSession, removeSession } from "../src/domain/board.ts";
+import { type Board, emptyBoard } from "../src/domain/model.ts";
+import { registerSession, removeSession } from "../src/domain/sessions.ts";
 import {
   type QueuePolicy,
   dropJobs,

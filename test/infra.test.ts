@@ -3,9 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isAlive, startBeacon } from "../src/infra/beacon.ts";
-import { type Board, registerSession } from "../src/domain/board.ts";
-import { BoardStore } from "../src/infra/store.ts";
+import { BoardStore } from "../src/adapters/sqlite/store.ts";
+import { isAlive, startBeacon } from "../src/adapters/unix/beacon.ts";
+import type { Board } from "../src/domain/model.ts";
+import { registerSession } from "../src/domain/sessions.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const freshDb = () => join(mkdtempSync(join(tmpdir(), "omp-coord-")), "scope.db");
@@ -21,8 +22,8 @@ describe("board store", () => {
         [
           "bun",
           "-e",
-          `import { BoardStore } from "${ROOT}/src/infra/store.ts";
-           import { registerSession } from "${ROOT}/src/domain/board.ts";
+          `import { BoardStore } from "${ROOT}/src/adapters/sqlite/store.ts";
+           import { registerSession } from "${ROOT}/src/domain/sessions.ts";
            const s = new BoardStore(${JSON.stringify(db)});
            s.transact(b => registerSession(b, { id: "${tag}", pid: 1, cwd: "/w", socket: "/s", now: Date.now() }));
            for (let i = 0; i < 150; i++) s.transact(b => { b.sent.push({ sessionId: "${tag}", at: i }); });`,
@@ -100,8 +101,8 @@ describe("board store", () => {
         [
           "bun",
           "-e",
-          `import { BoardStore } from "${ROOT}/src/infra/store.ts";
-           import { registerSession } from "${ROOT}/src/domain/board.ts";
+          `import { BoardStore } from "${ROOT}/src/adapters/sqlite/store.ts";
+           import { registerSession } from "${ROOT}/src/domain/sessions.ts";
            new BoardStore(${JSON.stringify(db)}).transact(b => registerSession(b, { id: "s${i}", pid: 1, cwd: "/w", socket: "/s", now: Date.now() }));`,
         ],
         { stderr: "inherit" },
@@ -135,7 +136,7 @@ describe("session liveness", () => {
     const child = Bun.spawn([
       "bun",
       "-e",
-      `import { startBeacon } from "${ROOT}/src/infra/beacon.ts"; startBeacon(${JSON.stringify(path)}); console.log("up"); setInterval(() => {}, 1000);`,
+      `import { startBeacon } from "${ROOT}/src/adapters/unix/beacon.ts"; startBeacon(${JSON.stringify(path)}); console.log("up"); setInterval(() => {}, 1000);`,
     ]);
     const reader = child.stdout.getReader();
     await reader.read();

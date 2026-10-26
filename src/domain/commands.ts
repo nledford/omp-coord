@@ -3,7 +3,10 @@
  * queue (`omp-coord run <queue> -- sh -c '<command>'`), so it waits for a slot inside the bash call instead of
  * starting at once. omp's `tool_call` check must answer within 30 s, so waiting there is not an option.
  */
-import type { CommandRule } from "./config.ts";
+/** What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue. */
+export type CommandRule =
+  | { pattern: RegExp; action: "refuse"; reason: string }
+  | { pattern: RegExp; action: "queue"; queue: string; lane: string | undefined };
 
 export type CommandDecision =
   | { kind: "allow" }

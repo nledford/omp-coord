@@ -147,6 +147,9 @@ The schema version is in `PRAGMA user_version`. A database with a different sche
 ## Develop
 
 ```sh
-bun install
-bun run check   # typecheck and tests
+just install
+just check   # typecheck and tests
+just         # every workflow
 ```
+
+Code layout and conventions for contributors: [`AGENTS.md`](AGENTS.md).

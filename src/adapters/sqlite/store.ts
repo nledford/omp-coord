@@ -10,7 +10,8 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type Board, type BoardEvent, emptyBoard } from "../domain/board.ts";
+import type { BoardRepository } from "../../app/ports.ts";
+import { type Board, type BoardEvent, emptyBoard } from "../../domain/model.ts";
 
 /** How long the event log keeps events. */
 export interface Retention {
@@ -104,7 +105,7 @@ export function stateDir(env: Record<string, string | undefined> = process.env):
   return dir;
 }
 
-export class BoardStore {
+export class BoardStore implements BoardRepository {
   readonly #db: Database;
   readonly #retention: Retention;
 

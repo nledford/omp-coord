@@ -1,16 +1,12 @@
 /**
- * Session liveness. Each session listens on a Unix socket for as long as its process lives; the kernel closes it
- * when the process dies, however it dies. Another session that cannot connect knows the session is gone. Unlike a
- * PID check, a reused PID cannot make a dead session look alive.
+ * Liveness over Unix sockets. Each session and each queued job listens on a socket for as long as its process lives;
+ * the kernel closes it when the process dies, however it dies. A process that cannot connect knows the other is gone.
+ * Unlike a PID check, a reused PID cannot make a dead process look alive.
  */
 import { rmSync } from "node:fs";
+import type { Listener, Liveness } from "../../app/ports.ts";
 
-export interface Beacon {
-  readonly path: string;
-  stop(): void;
-}
-
-export function startBeacon(path: string): Beacon {
+export function startBeacon(path: string): Listener {
   rmSync(path, { force: true });
   const listener = Bun.listen({
     unix: path,
@@ -22,13 +18,18 @@ export function startBeacon(path: string): Beacon {
     },
   });
   return {
-    path,
+    address: path,
     stop() {
       listener.stop(true);
       rmSync(path, { force: true });
     },
   };
 }
+
+export const unixLiveness: Liveness = {
+  isAlive: path => isAlive(path),
+  forget: path => rmSync(path, { force: true }),
+};
 
 /**
  * False only when the socket is certainly dead (missing, or nothing listening). Any other failure or a slow answer

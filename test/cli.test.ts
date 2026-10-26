@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+const CLI = join(import.meta.dir, "..", "src", "adapters", "cli", "cli.ts");
 
 function scope(queues: Record<string, unknown>) {
   const root = mkdtempSync(join(tmpdir(), "omp-coord-cli-"));

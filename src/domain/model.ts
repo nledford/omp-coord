@@ -1,0 +1,145 @@
+/**
+ * The coordination board's model: every omp session on this machine that shares one scope (e.g. one project), the
+ * agent slots they hold, the line for slots, messages, and build/test jobs, plus the event log entries transitions
+ * emit. The transitions live in `sessions.ts`, `agents.ts`, `messages.ts` and `queues.ts`.
+ *
+ * Pure state over a plain, JSON-serializable `Board`. Persistence and clocks live outside: callers pass `now`
+ * (ms since epoch) and run each transition inside one store transaction.
+ */
+
+/** How many agents may run at once, and which agent types fall where. */
+export interface AgentPolicy {
+  /** Pools of slots: each has a cap shared by every session, and the agent types it covers. */
+  pools: Record<string, { cap: number; agentTypes: string[] }>;
+  /** Pool for agent types no pool lists. */
+  defaultPool: string;
+  /** Agent types that never take a slot (read-only reviewers). */
+  exempt: string[];
+  /** What a subagent may start itself: only these types, at most this many running per parent, outside the caps. */
+  nested: { allow: string[]; maxRunningPerParent: number };
+  /** How long a freed slot stays held for the session first in line. */
+  holdMs: number;
+  /** How long an approved spawn may take to start its first run before its slot is given back. */
+  startTimeoutMs: number;
+  /** Messages one session may send per minute. */
+  messagesPerMinute: number;
+}
+
+export interface SessionRecord {
+  id: string;
+  /** Short name other sessions and the user address it by: A, B, C… */
+  label: string;
+  pid: number;
+  cwd: string;
+  /** Unix socket the session listens on while it lives; how other sessions tell it is gone. */
+  socket: string;
+  startedAt: number;
+}
+
+/** One agent's hold on a pool slot. `pool: null` for agents outside the caps (exempt and nested reviewers). */
+export interface AgentSlot {
+  sessionId: string;
+  /** omp agent id once its first run started; until then the spawn key, when omp gave one. */
+  agentId: string | undefined;
+  parentId: string;
+  agentType: string;
+  pool: string | null;
+  /** `starting`: approved, first run not seen yet. `running`: in a run. */
+  state: "starting" | "running";
+  since: number;
+}
+
+/** A session's place in line for a pool, after a refused spawn. */
+export interface Ticket {
+  sessionId: string;
+  pool: string;
+  since: number;
+  /** Set when a slot freed and is held for this session until then. */
+  holdUntil: number | undefined;
+  /** Whether the session has been told about its hold. */
+  notified: boolean;
+}
+
+export interface Message {
+  fromId: string;
+  toId: string;
+  text: string;
+  sentAt: number;
+}
+
+/** Something that happened on the board, for the event log. Transitions append; the store drains them. */
+export interface BoardEvent {
+  at: number;
+  type:
+    | "session_joined"
+    | "session_left"
+    | "spawn_approved"
+    | "spawn_refused"
+    | "run_started"
+    | "run_ended"
+    | "start_expired"
+    | "hold_granted"
+    | "hold_used"
+    | "hold_expired"
+    | "message_sent"
+    | "job_queued"
+    | "job_withdrawn"
+    | "job_refused"
+    | "job_started"
+    | "job_ended"
+    | "job_lost"
+    | "job_superseded"
+    | "job_reprioritized";
+  /** The omp session concerned; null for build jobs started outside any omp session. */
+  sessionId: string | null;
+  /** The session's letter when the event happened. */
+  label: string | null;
+  data: Record<string, unknown>;
+}
+
+/** A build or test job in a queue (see `queues.ts`). */
+export interface Job {
+  id: string;
+  queue: string;
+  /** The omp session whose agent started it, or null (a terminal, a script). Fair share is per owner. */
+  owner: string | null;
+  lane: string;
+  priority: number;
+  /** Jobs with the same key are duplicates (e.g. "<checkout> ci"). */
+  key: string | undefined;
+  /** What runs, for display. */
+  command: string;
+  /** The runner's liveness socket and process id. */
+  socket: string;
+  pid: number;
+  state: "waiting" | "running" | "superseded";
+  since: number;
+  startedAt: number | undefined;
+}
+
+export interface Board {
+  sessions: SessionRecord[];
+  slots: AgentSlot[];
+  waitlist: Ticket[];
+  messages: Message[];
+  /** When each session sent its recent messages, for the rate limit. */
+  sent: { sessionId: string; at: number }[];
+  jobs: Job[];
+  /** When each owner last had a job started in each queue, for fair share. */
+  served: { queue: string; owner: string | null; at: number }[];
+  /** Events since the board was loaded, oldest first. Not board state: the store moves them to the log. */
+  events: BoardEvent[];
+}
+
+export function emptyBoard(): Board {
+  return { sessions: [], slots: [], waitlist: [], messages: [], sent: [], jobs: [], served: [], events: [] };
+}
+
+/** Appends an event to the board's log. For transitions in the domain modules only. */
+export function emit(board: Board, at: number, type: BoardEvent["type"], sessionId: string | null, data: Record<string, unknown> = {}): void {
+  board.events.push({ at, type, sessionId, label: sessionId === null ? null : (labelOf(board, sessionId) ?? null), data });
+}
+
+export function labelOf(board: Board, sessionId: string): string | undefined {
+  return board.sessions.find(s => s.id === sessionId)?.label;
+}

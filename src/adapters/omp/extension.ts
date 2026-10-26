@@ -1,38 +1,29 @@
 /**
- * omp adapter: registers the session on the shared board, enforces the agent caps through omp's spawn check,
- * follows subagent runs to free slots, delivers messages and slot holds, refuses configured bash commands, and
- * offers `/coord`, `coord_status` and `coord_send`.
+ * omp adapter: maps omp's events, tools and commands onto the application's use cases (`app/coordinator.ts`):
+ * registers the session on the shared board, enforces the agent caps through omp's spawn check, follows subagent
+ * runs to free slots, delivers messages and slot holds, applies command rules to agents' bash calls, and offers
+ * `/coord`, `coord_status`, `coord_send` and `coord_job_priority`.
  *
  * omp binds this factory once per session in the process (the main session and every subagent). Subagents in an
  * isolated worktree even re-import the module, so the runtime lives on `globalThis`: every copy in the process shares
  * one registration. Messages are always sent through the main session's binding.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type Config, ConfigError, findConfigFile, loadConfig } from "./config.ts";
-import {
-  agentEnded,
-  agentStarted,
-  expire,
-  registerSession,
-  removeSession,
-  requestSpawn,
-  sendMessage,
-  takeInbox,
-  takeNewHolds,
-} from "./domain/board.ts";
-import { decideCommand } from "./commands.ts";
-import { dropJobs, setJobPriority } from "./domain/queues.ts";
-import { type Beacon, isAlive, startBeacon } from "./infra/beacon.ts";
-import { BoardStore, stateDir } from "./infra/store.ts";
-import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./omp-api.ts";
-import { clock, formatFooter, formatStatus } from "./report.ts";
+import { Coordinator } from "../../app/coordinator.ts";
+import type { Listener } from "../../app/ports.ts";
+import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
+import { decideCommand } from "../../domain/commands.ts";
+import { BoardStore, stateDir } from "../sqlite/store.ts";
+import { clock, formatFooter, formatStatus } from "../text/report.ts";
+import { startBeacon, unixLiveness } from "../unix/beacon.ts";
+import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
 
-/** How agents' queued commands start the runner: Bun running `cli.ts` next to this file. */
+/** How agents' queued commands start the runner: Bun running the CLI adapter. */
 const RUNNER_ARGV = (() => {
   const bun = Bun.which("bun");
-  return bun ? [bun, join(import.meta.dir, "cli.ts")] : undefined;
+  return bun ? [bun, join(import.meta.dir, "..", "cli", "cli.ts")] : undefined;
 })();
 
 const TICK_MS = 2000;
@@ -44,7 +35,8 @@ const NO_CONFIG = "omp-coord is inactive: no .omp-coord.json above this session'
 interface Runtime {
   config: Config;
   store: BoardStore;
-  beacon: Beacon;
+  coordinator: Coordinator;
+  listener: Listener;
   sessionId: string;
   label: string;
   /** The main session's binding and context: the only ones that may send it messages. */
@@ -84,16 +76,13 @@ export default function ompCoord(pi: ExtensionAPI): void {
     const rt = shared.runtime;
     if (!rt) return undefined;
     try {
-      const decision = rt.store.transact(board =>
-        requestSpawn(board, rt.config.agents, {
-          sessionId: rt.sessionId,
-          parentAgentId: ctx.agent.id,
-          parentIsSubagent: ctx.agent.kind === "sub",
-          agentType: event.agent.toLowerCase(),
-          ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
-          now: Date.now(),
-        }),
-      );
+      const decision = rt.coordinator.requestSpawn({
+        sessionId: rt.sessionId,
+        parentAgentId: ctx.agent.id,
+        parentIsSubagent: ctx.agent.kind === "sub",
+        agentType: event.agent.toLowerCase(),
+        ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
+      });
       if (decision.allowed) return undefined;
       notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
       return { block: true, reason: `omp-coord: ${decision.reason}` };
@@ -108,16 +97,14 @@ export default function ompCoord(pi: ExtensionAPI): void {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
     guarded(rt, "record an agent run", () => {
-      const count = rt.store.transact(board =>
-        agentStarted(board, rt.config.agents, {
-          sessionId: rt.sessionId,
-          agentId: ctx.agent.id,
-          parentId: ctx.agent.parentId ?? "Main",
-          parentIsSubagent: (ctx.agent.parentId ?? "Main") !== "Main",
-          agentType: ctx.agent.name.toLowerCase(),
-          now: Date.now(),
-        }),
-      );
+      const parentId = ctx.agent.parentId ?? "Main";
+      const count = rt.coordinator.agentStarted({
+        sessionId: rt.sessionId,
+        agentId: ctx.agent.id,
+        parentId,
+        parentIsSubagent: parentId !== "Main",
+        agentType: ctx.agent.name.toLowerCase(),
+      });
       if (count && count.used > count.cap) {
         notify(rt, `omp-coord: ${ctx.agent.id} runs over the ${count.pool} cap (${count.used}/${count.cap}); nothing new starts until the total is under it`, "warning");
       }
@@ -127,9 +114,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
   pi.on("agent_end", (_event, ctx) => {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
-    guarded(rt, "free an agent slot", () =>
-      rt.store.transact(board => agentEnded(board, rt.config.agents, { sessionId: rt.sessionId, agentId: ctx.agent.id, now: Date.now() })),
-    );
+    guarded(rt, "free an agent slot", () => rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id }));
   });
 
   pi.on("tool_call", event => {
@@ -164,7 +149,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
       if (!rt) return text(shared.inactive, true);
       const priority = Number(params.priority);
       if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
-      const result = rt.store.transact(board => setJobPriority(board, { id: params.job, sessionId: rt.sessionId, priority, now: Date.now() }));
+      const result = rt.coordinator.setJobPriority(rt.sessionId, params.job, priority);
       return result.ok ? text(`Job ${params.job} now has priority ${priority}.`) : text(`Not changed: ${result.reason}.`, true);
     },
   });
@@ -233,7 +218,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  let joined: Pick<Runtime, "store" | "beacon" | "sessionId" | "label">;
+  let joined: Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label">;
   try {
     joined = openSession(config, ctx.cwd);
   } catch (error) {
@@ -243,44 +228,45 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   }
 
   const rt: Runtime = { config, ...joined, pi, ctx, timer: undefined, ticks: 0, footer: undefined, pruning: false };
-  const { store, sessionId, label } = rt;
   shared.runtime = rt;
   // `omp-coord run` started from this session's bash calls (e.g. by a `just` recipe) queues jobs as this session's.
-  process.env.OMP_COORD_SESSION = sessionId;
+  process.env.OMP_COORD_SESSION = rt.sessionId;
   rt.timer = ctx.setInterval(() => tick(rt), TICK_MS);
   await prune(rt);
 
-  const others = store
-    .read()
-    .sessions.filter(s => s.id !== sessionId)
+  const others = rt.coordinator
+    .board()
+    .sessions.filter(s => s.id !== rt.sessionId)
     .map(s => `${s.label} (${s.cwd})`);
   notify(
     rt,
-    `omp-coord: this is session ${label} (scope ${config.scope}). ` +
+    `omp-coord: this is session ${rt.label} (scope ${config.scope}). ` +
       (others.length ? `Other sessions: ${others.join(", ")}. Agent caps are shared with them.` : "No other session is active."),
     "info",
   );
 }
 
 /** Opens the scope's board, starts this session's liveness socket and registers it; undoes both on failure. */
-function openSession(config: Config, cwd: string): Pick<Runtime, "store" | "beacon" | "sessionId" | "label"> {
+function openSession(config: Config, cwd: string): Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label"> {
   const dir = stateDir();
   mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
   const store = new BoardStore(join(dir, `${config.scope}.db`), config.history);
-  let beacon: Beacon | undefined;
+  let listener: Listener | undefined;
   try {
+    const coordinator = new Coordinator(config, store, unixLiveness, Date);
     const sessionId = randomBytes(6).toString("hex");
-    const started = startBeacon(join(dir, "s", `${sessionId}.sock`));
-    beacon = started;
-    const label = store.transact(board =>
-      registerSession(board, { id: sessionId, pid: process.pid, cwd, socket: started.path, now: Date.now() }),
-    );
-    return { store, beacon: started, sessionId, label };
+    listener = startBeacon(join(dir, "s", `${sessionId}.sock`));
+    const label = coordinator.join(identity(sessionId, cwd, listener));
+    return { store, coordinator, listener, sessionId, label };
   } catch (error) {
-    beacon?.stop();
+    listener?.stop();
     store.close();
     throw error;
   }
+}
+
+function identity(sessionId: string, cwd: string, listener: Listener) {
+  return { id: sessionId, pid: process.pid, cwd, address: listener.address };
 }
 
 function stop(rt: Runtime): void {
@@ -288,9 +274,9 @@ function stop(rt: Runtime): void {
   if (process.env.OMP_COORD_SESSION === rt.sessionId) delete process.env.OMP_COORD_SESSION;
   rt.ctx.clearTimer(rt.timer);
   try {
-    rt.store.transact(board => removeSession(board, rt.config.agents, rt.sessionId, Date.now()));
+    rt.coordinator.leave(rt.sessionId);
   } finally {
-    rt.beacon.stop();
+    rt.listener.stop();
     rt.store.close();
   }
 }
@@ -298,18 +284,7 @@ function stop(rt: Runtime): void {
 async function tick(rt: Runtime): Promise<void> {
   if (shared.runtime !== rt) return;
   rt.ticks++;
-  const now = Date.now();
-  const { inbox, holds, footer, label } = rt.store.transact(board => {
-    // Another session may have dropped this one (e.g. its liveness check timed out): join again.
-    const label = registerSession(board, { id: rt.sessionId, pid: process.pid, cwd: rt.ctx.cwd, socket: rt.beacon.path, now });
-    expire(board, rt.config.agents, now);
-    return {
-      inbox: takeInbox(board, rt.sessionId),
-      holds: takeNewHolds(board, rt.sessionId),
-      footer: formatFooter(board, rt.config.agents, rt.config.queues, rt.sessionId),
-      label,
-    };
-  });
+  const { label, inbox, holds, board } = rt.coordinator.tick(identity(rt.sessionId, rt.ctx.cwd, rt.listener));
   rt.label = label;
 
   for (const m of inbox) {
@@ -328,6 +303,7 @@ async function tick(rt: Runtime): Promise<void> {
     );
   }
 
+  const footer = formatFooter(board, rt.config.agents, rt.config.queues, rt.sessionId);
   if (rt.ctx.mode === "tui" && footer !== rt.footer) {
     rt.footer = footer;
     rt.ctx.ui.setStatus(STATUS_KEY, footer);
@@ -335,40 +311,24 @@ async function tick(rt: Runtime): Promise<void> {
   if (rt.ticks % PRUNE_EVERY_TICKS === 0) await prune(rt);
 }
 
-/** Removes sessions and queued jobs whose process is gone, freeing their slots and places in line. */
+/** Removes sessions and queued jobs whose process is gone, one prune at a time. */
 async function prune(rt: Runtime): Promise<void> {
   if (rt.pruning) return;
   rt.pruning = true;
   try {
-    const board = rt.store.read();
-    const others = board.sessions.filter(s => s.id !== rt.sessionId);
-    const jobs = board.jobs;
-    const [sessionsAlive, jobsAlive] = await Promise.all([
-      Promise.all(others.map(s => isAlive(s.socket))),
-      Promise.all(jobs.map(j => isAlive(j.socket))),
-    ]);
-    const dead = others.filter((_, i) => !sessionsAlive[i]);
-    const deadJobs = jobs.filter((_, i) => !jobsAlive[i]);
-    if ((dead.length || deadJobs.length) && shared.runtime === rt) {
-      rt.store.transact(b => {
-        for (const s of dead) removeSession(b, rt.config.agents, s.id, Date.now());
-        if (deadJobs.length) dropJobs(b, rt.config.queues, deadJobs.map(j => j.id), Date.now());
-      });
-      // Nothing listens on these any more; the dead processes could not remove their own.
-      for (const x of [...dead, ...deadJobs]) rmSync(x.socket, { force: true });
-    }
+    await rt.coordinator.prune(rt.sessionId, () => shared.runtime === rt);
   } finally {
     rt.pruning = false;
   }
 }
 
 function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
-  const result = rt.store.transact(board => sendMessage(board, rt.config.agents, { from: rt.sessionId, to, text: body, now: Date.now() }));
+  const result = rt.coordinator.send(rt.sessionId, to, body);
   return result.ok ? text(`Sent to ${result.delivered.join(", ")}.`) : text(`Not sent: ${result.reason}.`, true);
 }
 
 function statusText(rt: Runtime): string {
-  return formatStatus(rt.store.read(), rt.config.agents, rt.config.queues, rt.config.scope, rt.sessionId, Date.now());
+  return formatStatus(rt.coordinator.board(), rt.config.agents, rt.config.queues, rt.config.scope, rt.sessionId, Date.now());
 }
 
 function deliver(rt: Runtime, content: string): void {

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CommandRule } from "../src/config.ts";
-import { decideCommand } from "../src/commands.ts";
+import { type CommandRule, decideCommand } from "../src/domain/commands.ts";
 
 const rules: CommandRule[] = [
   { pattern: /(^|[;&|(\s])pkill\b/, action: "refuse", reason: "stop only your own process" },

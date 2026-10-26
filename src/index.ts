@@ -1,1 +1,1 @@
-export { default } from "./extension.ts";
+export { default } from "./adapters/omp/extension.ts";
