@@ -6,6 +6,11 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `omp-coord status --json` prints the board as one JSON object for scripts (scope, sessions, pools, line, agents, claims, queues with their running and waiting jobs, latest notes, load; times in epoch milliseconds). With a board that cannot be read it prints nothing to stdout and exits non-zero. The fields are documented in [docs/commands.md](docs/commands.md).
+- A list of the running agents with their type, parent, pool, state and age: `/coord agents`, `omp-coord status --agents`, and `agents` in `status --json`.
+
 ## [0.2.1] - 2026-10-26
 
 ### Added

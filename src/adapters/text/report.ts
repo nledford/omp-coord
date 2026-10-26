@@ -6,6 +6,7 @@ import { pauseReason } from "../../domain/control.ts";
 import type { DayStats, InterruptedSession } from "../../domain/history.ts";
 import { currentLoad } from "../../domain/limits.ts";
 import { type AgentPolicy, type Board, labelOf, type Note } from "../../domain/model.ts";
+import { agentList, LATEST_NOTES } from "../../domain/overview.ts";
 import { orderWaiting, type Queues, slotsOf } from "../../domain/queues.ts";
 
 export function clock(ms: number): string {
@@ -13,6 +14,37 @@ export function clock(ms: number): string {
 }
 
 const minutes = (ms: number) => `${Math.round(ms / 60_000)} min`;
+
+/** `45 s`, `12 min`, `2 h 5 min`. */
+function age(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const mins = Math.floor(seconds / 60);
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+}
+
+/**
+ * The agents holding slots, one line each: session letter, id, type, parent, pool, state and how long ago the slot was
+ * taken. A starting agent's id is the spawn key omp gave, or `(no id yet)`.
+ */
+export function formatAgents(board: Board, now: number): string {
+  const agents = agentList(board);
+  if (agents.length === 0) return "No agents are running.";
+  const rows = agents.map(a => [
+    a.session ?? "?",
+    a.id ?? "(no id yet)",
+    a.type,
+    `parent ${a.parent}`,
+    a.pool === null ? "outside the caps" : `pool ${a.pool}`,
+    a.state,
+    age(now - a.since),
+  ]);
+  const widths = rows[0]?.map((_, c) => Math.max(...rows.map(r => (r[c] as string).length))) ?? [];
+  return [
+    `Agents (${agents.length}):`,
+    ...rows.map(r => `  ${r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c] ?? 0))).join("  ")}`),
+  ].join("\n");
+}
 
 /** Everything on the board, from the view of session `me` ("" outside omp). */
 export function formatStatus(board: Board, config: Config, me: string, now: number): string {
@@ -80,7 +112,7 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
   const queueLines = formatQueues(board, config.queues, now);
   if (queueLines.length) lines.push("Build and test queues:", ...queueLines);
 
-  const recent = board.notes.slice(-3);
+  const recent = board.notes.slice(-LATEST_NOTES);
   if (recent.length)
     lines.push(
       "Latest decisions (all: notes):",

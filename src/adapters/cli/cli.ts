@@ -4,7 +4,7 @@
  * terminals, or agents' bash calls (which the extension rewrites to go through here), and reports on the scope.
  *
  *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
- *   omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <text…>
+ *   omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
  *   omp-coord pause [reason…] | resume | doctor [--fix]
  *
  * `run` waits for a slot, runs the command with the terminal's stdin/stdout/stderr, and exits with its exit code.
@@ -22,11 +22,19 @@ import { Coordinator } from "../../app/coordinator.ts";
 import { doctor } from "../../app/doctor.ts";
 import { EXIT_TIMED_OUT, runJob } from "../../app/job-runner.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
+import { statusView } from "../../domain/overview.ts";
 import { MAX_PRIORITY } from "../../domain/queues.ts";
 import { osLoad } from "../os/load.ts";
 import { groupRunning } from "../os/process-group.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
-import { formatFindings, formatInterrupted, formatNotes, formatStats, formatStatus } from "../text/report.ts";
+import {
+  formatAgents,
+  formatFindings,
+  formatInterrupted,
+  formatNotes,
+  formatStats,
+  formatStatus,
+} from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 
 const EXIT_USAGE = 2;
@@ -36,10 +44,41 @@ const DAY = 86_400_000;
 
 const USAGE = `usage:
   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command…>
-  omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <text…>
+  omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
   omp-coord pause [reason…] | resume | doctor [--fix]`;
 
 class UsageError extends Error {}
+
+/**
+ * `status` prints the board as text; `--agents` lists only the running agents; `--json` prints one JSON object. The
+ * output is built whole before anything is written, so a board that cannot be read leaves stdout empty.
+ */
+function status(args: string[]): Promise<number> {
+  let flags: ReturnType<typeof parseStatusFlags>;
+  try {
+    flags = parseStatusFlags(args);
+  } catch (error) {
+    throw new UsageError(`omp-coord status: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const { agents, json } = flags.values;
+  if (flags.positionals.length > 0 || (agents && json))
+    throw new UsageError("omp-coord status: give no arguments, or one of --agents and --json");
+  return withScope(({ config, coordinator }) => {
+    const board = coordinator.board();
+    const now = Date.now();
+    if (json) return print(JSON.stringify(statusView(board, config, now), null, 2));
+    return print(agents ? formatAgents(board, now) : formatStatus(board, config, "", now));
+  });
+}
+
+function parseStatusFlags(args: string[]) {
+  return parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: { agents: { type: "boolean" }, json: { type: "boolean" } },
+  });
+}
 
 async function main(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
@@ -47,7 +86,7 @@ async function main(argv: string[]): Promise<number> {
     case "run":
       return run(rest);
     case "status":
-      return withScope(({ config, coordinator }) => print(formatStatus(coordinator.board(), config, "", Date.now())));
+      return status(rest);
     case "stats":
       return withScope(({ coordinator }) =>
         print(formatStats(coordinator.stats(wholeNumber(rest[0], 7, "days") * DAY))),

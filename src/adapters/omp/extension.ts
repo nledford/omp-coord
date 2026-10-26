@@ -20,7 +20,15 @@ import { decideCommand } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
-import { clock, formatFooter, formatInterrupted, formatNotes, formatStats, formatStatus } from "../text/report.ts";
+import {
+  clock,
+  formatAgents,
+  formatFooter,
+  formatInterrupted,
+  formatNotes,
+  formatStats,
+  formatStatus,
+} from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
 
@@ -334,7 +342,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
 
   pi.registerCommand("coord", {
     description:
-      "Coordination with other omp sessions: `/coord` status; `send <letter|B/agent|all> <text>`; `pause [reason]`, `resume`; " +
+      "Coordination with other omp sessions: `/coord` status; `agents`; `send <letter|B/agent|all> <text>`; `pause [reason]`, `resume`; " +
       "`claim <branch|worktree|pr> <target> [note]`, `release <kind> <target>`; `note <text>`, `notes [n]`; `stats [days]`; `interrupted [hours]`",
     async handler(args, ctx) {
       const rt = shared.runtime;
@@ -349,6 +357,8 @@ export default function ompCoord(pi: ExtensionAPI): void {
         switch (sub) {
           case "":
             return ctx.ui.notify(statusText(rt), "info");
+          case "agents":
+            return ctx.ui.notify(formatAgents(rt.coordinator.board(), Date.now()), "info");
           case "send": {
             const m = /^(\S+)\s+([\s\S]+)$/.exec(tail);
             return say(

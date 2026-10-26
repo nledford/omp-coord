@@ -8,6 +8,7 @@ The version covers:
 
 - the `.omp-coord.json` fields, their defaults and what they accept ([configuration](configuration.md));
 - the `omp-coord` subcommands, flags and exit codes (75, 124, 2) ([commands](commands.md));
+- the fields of `omp-coord status --json` ([commands](commands.md#status));
 - the agent tools (`coord_*`) and their parameters, and the `/coord` commands;
 - the environment variables it sets or reads (`OMP_COORD_*`);
 - the event types and fields in the event log, and the decision log ([event log](event-log.md));

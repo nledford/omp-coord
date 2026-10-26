@@ -46,7 +46,7 @@ Every omp session started in that folder or below now shares 6 agent slots, and 
 | [Agent slots](docs/agent-slots.md) | How caps, the line, holds and nested agents work. |
 | [Queues](docs/queues.md) | `omp-coord run`, order, lanes, time limits, agents' commands. |
 | [Working across sessions](docs/coordination.md) | Messages, claims, pause, the decision log, ports, crash recovery. |
-| [Commands](docs/commands.md) | `/coord`, agent tools, CLI, environment variables. |
+| [Commands](docs/commands.md) | `/coord`, agent tools, CLI (`status --json` for scripts), environment variables. |
 | [Event log](docs/event-log.md) | The SQLite tables and events, with example queries. |
 | [Versioning](docs/versioning.md) | What the version promises; cutting a release. |
 

@@ -142,3 +142,88 @@ test("doctor reports a socket file nothing listens on, and --fix removes it", as
   expect(await new Response(run("doctor", "--fix").stdout).text()).toMatch(/removed 1 socket file/);
   expect(existsSync(join(root, "state", "s", "job-dead.sock"))).toBe(false);
 }, 20_000);
+
+describe("omp-coord status --json and --agents", () => {
+  const text = async (stream: ReadableStream | null | undefined) => new Response(stream ?? undefined).text();
+
+  test("--json prints one object for an empty board, with every documented top-level field", async () => {
+    const { run } = scope({ heavy: { slots: 1 } });
+    const proc = run("status", "--json");
+    expect(await proc.exited).toBe(0);
+    expect(await text(proc.stderr)).toBe("");
+    const view = JSON.parse(await text(proc.stdout));
+    expect(Object.keys(view).sort()).toEqual(
+      [
+        "agents",
+        "claims",
+        "generatedAt",
+        "line",
+        "load",
+        "notes",
+        "paused",
+        "pools",
+        "queues",
+        "scope",
+        "sessions",
+      ].sort(),
+    );
+    expect(view.scope.name).toBe("cli");
+    expect(view.agents).toEqual([]);
+    expect(view.queues).toMatchObject([{ name: "heavy", slots: 1, running: [], waiting: [] }]);
+  });
+
+  test("--json lists a running and a waiting job with their fields", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    const first = run(
+      "run",
+      "heavy",
+      "--key",
+      "k1",
+      "--timeout",
+      "30s",
+      "--",
+      "sh",
+      "-c",
+      `touch ${root}/a; while [ ! -e ${root}/go ]; do sleep 0.1; done`,
+    );
+    await started(join(root, "a"));
+    const second = run("run", "heavy", "--lane", "normal", "--", "true");
+    // Poll until the second runner has joined the line, then release the first job.
+    let view: { queues: { running: Record<string, unknown>[]; waiting: unknown[] }[] };
+    const deadline = Date.now() + 10_000;
+    do {
+      view = JSON.parse(await text(run("status", "--json").stdout));
+      if (view.queues[0]?.waiting.length) break;
+      await Bun.sleep(100); // polling the board another process writes; there is no event to await
+    } while (Date.now() < deadline);
+    writeFileSync(join(root, "go"), "");
+    const queue = view.queues[0] as (typeof view.queues)[number];
+    expect(queue.running).toHaveLength(1);
+    expect(queue.running[0]).toMatchObject({ key: "k1", session: null, owner: null, state: "running", position: null });
+    expect(String(queue.running[0]?.command)).toContain("sh -c");
+    expect(typeof queue.running[0]?.startedAt).toBe("number");
+    expect(queue.waiting).toMatchObject([{ command: "true", state: "waiting", position: 1, startedAt: null }]);
+    await Promise.all([first.exited, second.exited]);
+  }, 20_000);
+
+  test("--json with a board that cannot be read exits non-zero, writes the error to stderr and nothing to stdout", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    writeFileSync(join(root, "state", "cli.db"), "this is not a database, just text that is long enough ".repeat(100));
+    const proc = run("status", "--json");
+    expect(await proc.exited).not.toBe(0);
+    expect(await text(proc.stdout)).toBe("");
+    expect(await text(proc.stderr)).toMatch(/^omp-coord: .+/);
+  });
+
+  test("--agents prints the agents section; --json with --agents, or a stray argument, is a usage error", async () => {
+    const { run } = scope({ heavy: { slots: 1 } });
+    const proc = run("status", "--agents");
+    expect(await proc.exited).toBe(0);
+    expect(await text(proc.stdout)).toBe("No agents are running.\n");
+    for (const args of [["--json", "--agents"], ["--nope"], ["extra"]]) {
+      const bad = run("status", ...args);
+      expect(await bad.exited).toBe(2);
+      expect(await text(bad.stdout)).toBe("");
+    }
+  });
+});
