@@ -24,29 +24,21 @@ describe("next version", () => {
     expect(next("1.4.2", "feature")).toBe("1.5.0");
     expect(next("1.4.2", "fix")).toBe("1.4.3");
   });
-
-  test("after a prerelease, the release is the version it was a prerelease of", () => {
-    expect(next("0.4.0-rc.2", "fix")).toBe("0.4.0");
-    expect(next("2.0.0-beta.1", "breaking")).toBe("2.0.0");
-  });
 });
 
 describe("versions and tags", () => {
-  test("ordering follows SemVer precedence, prereleases included", () => {
-    const sorted = ["1.0.0", "1.0.0-rc.10", "1.0.0-alpha", "1.0.0-rc.2", "0.9.12", "1.0.0-alpha.1", "1.0.0-beta"]
-      .map(parseVersion)
-      .sort(compareVersions)
-      .map(formatVersion);
-    expect(sorted).toEqual(["0.9.12", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-beta", "1.0.0-rc.2", "1.0.0-rc.10", "1.0.0"]);
+  test("ordering is numeric per field, not textual", () => {
+    const sorted = ["1.0.0", "0.10.0", "0.9.12", "0.9.2", "2.0.0"].map(parseVersion).sort(compareVersions).map(formatVersion);
+    expect(sorted).toEqual(["0.9.2", "0.9.12", "0.10.0", "1.0.0", "2.0.0"]);
   });
 
-  test("the last release is the highest vX.Y.Z tag, not the newest or the last listed", () => {
-    expect(formatVersion(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "release-3"])!)).toBe("0.10.0");
+  test("the last release is the highest vX.Y.Z tag, not the newest or the last listed; other tags are ignored", () => {
+    expect(formatVersion(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "v0.11.0-rc.1"])!)).toBe("0.10.0");
     expect(latestRelease(["nightly"])).toBeUndefined();
   });
 
-  test("malformed versions are rejected", () => {
-    for (const bad of ["v1.2.3", "1.2", "01.2.3", "1.2.3-", "1.2.3-01"]) expect(() => parseVersion(bad)).toThrow(/not a version/);
+  test("malformed versions and prereleases are rejected", () => {
+    for (const bad of ["v1.2.3", "1.2", "01.2.3", "1.2.3-", "1.2.3-rc.1"]) expect(() => parseVersion(bad)).toThrow(/not a release version/);
   });
 });
 
@@ -89,6 +81,29 @@ describe("changelog", () => {
     const empty = cutChangelog(log, "0.1.1", "2026-11-02", "0.1.0");
     expect(() => cutChangelog(empty, "0.1.2", "2026-11-03", "0.1.1")).toThrow(/Unreleased section is empty/);
     expect(() => cutChangelog(log, "0.1.0", "2026-11-02", "0.1.0")).toThrow(/already has a section for 0.1.0/);
+  });
+
+  test("a mention of the Unreleased heading in the intro, link definitions inside a section, and CRLF line ends are handled", () => {
+    const tricky = [
+      "# Changelog",
+      "",
+      "Add entries under `## [Unreleased]` as they land.",
+      "",
+      "## [Unreleased]",
+      "",
+      "- Faster [queues][q].",
+      "",
+      "[q]: docs/queues.md",
+      "",
+      "## [0.1.0] - 2026-10-26",
+      "",
+      "- First release.",
+      "",
+    ].join("\r\n");
+    const cut = cutChangelog(tricky, "0.1.1", "2026-11-02", "0.1.0");
+    expect(cut).not.toContain("\r");
+    expect(cut).toContain("Add entries under `## [Unreleased]` as they land.\n\n## [Unreleased]\n\n## [0.1.1] - 2026-11-02\n");
+    expect(changelogSection(cut, "0.1.1")).toBe("- Faster [queues][q].\n\n[q]: docs/queues.md");
   });
 });
 

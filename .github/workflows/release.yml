@@ -1,4 +1,4 @@
-# On a version tag (vX.Y.Z or vX.Y.Z-pre), pushed by `just release-publish`: check that the tag names a commit on
+# On a version tag (vX.Y.Z), pushed by `just release-publish`: check that the tag names a commit on
 # main whose version files and changelog match it, run the checks, then create the GitHub release with the changelog
 # entry as its notes. omp installs plugins from git, so the tag itself is the publication; nothing goes to a registry.
 # Re-running the workflow for a tag that already has a release fails at `gh release create` instead of replacing it.
@@ -48,6 +48,4 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           bun scripts/release.ts notes "${TAG#v}" > "$RUNNER_TEMP/notes.md"
-          prerelease=()
-          if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
-          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"

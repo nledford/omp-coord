@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
 /**
- * Releases: the version policy (README, "Versioning") in code.
+ * Releases: the version policy (docs/versioning.md) in code.
  *
  *   bun scripts/release.ts plan                       what would be released, and the next version per kind of change
- *   bun scripts/release.ts prepare <breaking|feature|fix|X.Y.Z[-pre]>
+ *   bun scripts/release.ts prepare <breaking|feature|fix|X.Y.Z>
  *                                                     set the version, date the changelog, check, commit, tag (local only)
  *   bun scripts/release.ts verify [vX.Y.Z]            the version files agree (and match the tag, with its changelog entry)
  *   bun scripts/release.ts notes <X.Y.Z>              the changelog entry of a version, for the GitHub release
  *
  * The version lives in package.json and in the marketplace catalog; omp upgrades marketplace installs only when the
- * catalog's version goes up, so both change together, and only in release commits.
+ * catalog's version goes up, so both change together, and only in release commits. There are no prereleases: the
+ * catalog follows main, so omp would move every marketplace install onto one.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,60 +25,35 @@ export interface Version {
   major: number;
   minor: number;
   patch: number;
-  pre: string | undefined;
 }
 
-const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
+const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export function parseVersion(text: string): Version {
   const m = VERSION.exec(text);
-  if (!m) throw new Error(`not a version: "${text}" (expected X.Y.Z or X.Y.Z-pre, without a leading v)`);
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] };
+  if (!m) throw new Error(`not a release version: "${text}" (expected X.Y.Z, without a leading v or a -prerelease suffix)`);
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
 }
 
 export function formatVersion(v: Version): string {
-  return `${v.major}.${v.minor}.${v.patch}${v.pre === undefined ? "" : `-${v.pre}`}`;
+  return `${v.major}.${v.minor}.${v.patch}`;
 }
 
-/** SemVer precedence: negative when a < b. */
+/** Negative when a comes before b. */
 export function compareVersions(a: Version, b: Version): number {
-  for (const k of ["major", "minor", "patch"] as const) if (a[k] !== b[k]) return a[k] - b[k];
-  if (a.pre === b.pre) return 0;
-  if (a.pre === undefined) return 1;
-  if (b.pre === undefined) return -1;
-  const x = a.pre.split(".");
-  const y = b.pre.split(".");
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const p = x[i];
-    const q = y[i];
-    if (p === undefined) return -1;
-    if (q === undefined) return 1;
-    if (p === q) continue;
-    const pn = /^\d+$/.test(p);
-    const qn = /^\d+$/.test(q);
-    if (pn && qn) return Number(p) - Number(q);
-    if (pn) return -1;
-    if (qn) return 1;
-    return p < q ? -1 : 1;
-  }
-  return 0;
+  return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
 }
 
 /**
  * The next release after `released` for the most significant kind of change in it. Before 1.0.0 a breaking change
  * moves the minor version and everything else the patch version; from 1.0.0 on, breaking, feature and fix move
- * major, minor and patch. A prerelease of the target is replaced by the target itself.
+ * major, minor and patch.
  */
 export function nextVersion(released: Version, change: Change): Version {
-  const core = { ...released, pre: undefined };
-  if (released.pre !== undefined) {
-    // Releasing 0.3.0 after 0.3.0-rc.2: the target was chosen when the prerelease was cut.
-    return core;
-  }
   const level = released.major === 0 ? (change === "breaking" ? "minor" : "patch") : change === "breaking" ? "major" : change === "feature" ? "minor" : "patch";
-  if (level === "major") return { major: core.major + 1, minor: 0, patch: 0, pre: undefined };
-  if (level === "minor") return { ...core, minor: core.minor + 1, patch: 0 };
-  return { ...core, patch: core.patch + 1 };
+  if (level === "major") return { major: released.major + 1, minor: 0, patch: 0 };
+  if (level === "minor") return { ...released, minor: released.minor + 1, patch: 0 };
+  return { ...released, patch: released.patch + 1 };
 }
 
 /** The highest released version among `vX.Y.Z` tags, if any. */
@@ -89,12 +65,15 @@ export function latestRelease(tags: string[]): Version | undefined {
     .at(-1);
 }
 
+/** The link definitions at the bottom of the changelog: `[Unreleased]: …` and `[X.Y.Z]: …`. */
+const RELEASE_LINK = /^\[(?:Unreleased|\d+\.\d+\.\d+)\]: /;
+
 /** The text of a changelog section, without its heading; undefined when there is no such section. */
 export function changelogSection(changelog: string, name: string): string | undefined {
-  const lines = changelog.split("\n");
+  const lines = changelog.replaceAll("\r\n", "\n").split("\n");
   const start = lines.findIndex(l => l.startsWith(`## [${name}]`));
   if (start === -1) return undefined;
-  const end = lines.findIndex((l, i) => i > start && (l.startsWith("## ") || /^\[[^\]]+\]: /.test(l)));
+  const end = lines.findIndex((l, i) => i > start && (l.startsWith("## ") || RELEASE_LINK.test(l)));
   return lines
     .slice(start + 1, end === -1 ? undefined : end)
     .join("\n")
@@ -103,14 +82,15 @@ export function changelogSection(changelog: string, name: string): string | unde
 
 /**
  * Turns the Unreleased section into the section of `version`, dated `date`, under a new empty Unreleased section,
- * and updates the comparison links at the bottom.
+ * and updates the comparison links at the bottom. Line ends come out as `\n`.
  */
-export function cutChangelog(changelog: string, version: string, date: string, previous: string | undefined): string {
+export function cutChangelog(input: string, version: string, date: string, previous: string | undefined): string {
+  const changelog = input.replaceAll("\r\n", "\n");
   const unreleased = changelogSection(changelog, "Unreleased");
   if (unreleased === undefined) throw new Error(`${FILES.changelog} has no "## [Unreleased]" section`);
   if (unreleased === "") throw new Error(`${FILES.changelog}: the Unreleased section is empty; describe the changes in this release first`);
   if (changelogSection(changelog, version) !== undefined) throw new Error(`${FILES.changelog} already has a section for ${version}`);
-  const body = changelog.replace("## [Unreleased]", `## [Unreleased]\n\n## [${version}] - ${date}`);
+  const body = changelog.replace(/^## \[Unreleased\].*$/m, `## [Unreleased]\n\n## [${version}] - ${date}`);
   const versionLink = previous === undefined ? `${REPO_URL}/releases/tag/v${version}` : `${REPO_URL}/compare/v${previous}...v${version}`;
   const links = `[Unreleased]: ${REPO_URL}/compare/v${version}...HEAD\n[${version}]: ${versionLink}`;
   return /^\[Unreleased\]: .*$/m.test(body) ? body.replace(/^\[Unreleased\]: .*$/m, links) : `${body.trimEnd()}\n\n${links}\n`;
@@ -210,12 +190,19 @@ async function prepare(arg: string | undefined): Promise<void> {
     verify(undefined);
     const check = Bun.spawn(["bun", "run", "check"], { cwd: ROOT, stdio: ["inherit", "inherit", "inherit"] });
     if ((await check.exited) !== 0) throw new Error("bun run check failed");
+    await git("commit", "--quiet", "-m", `Release ${tag}`, "--", ...Object.keys(files));
   } catch (error) {
     await git("checkout", "--", ...Object.keys(files));
     throw new Error(`${error instanceof Error ? error.message : String(error)}; the version files are back as they were`);
   }
-  await git("commit", "--quiet", "-m", `Release ${tag}`, "--", ...Object.keys(files));
-  await git("tag", "--annotate", tag, "--message", `omp-coord ${tag}`);
+  try {
+    await git("tag", "--annotate", tag, "--message", `omp-coord ${tag}`);
+  } catch (error) {
+    throw new Error(
+      `committed Release ${tag} but could not tag it (${error instanceof Error ? error.message : String(error)}). ` +
+        `Fix that, then run: git tag --annotate ${tag} --message "omp-coord ${tag}"`,
+    );
+  }
   console.log(`\nCommitted and tagged ${tag} locally. Nothing is pushed.`);
   console.log("Review with `git show`, then publish with `just release-publish` (pushes main and the tag; CI creates the GitHub release).");
   console.log(`To undo before publishing: git tag -d ${tag} && git reset --hard HEAD~1`);

@@ -47,7 +47,7 @@ check: typecheck test
 release-plan:
     @bun '{{ root }}/scripts/release.ts' plan
 
-# Cut a release locally: `just release fix|feature|breaking` (or an exact X.Y.Z). Bumps the version files, dates the changelog, runs the checks, commits and tags. Pushes nothing.
+# Cut a release locally: `just release fix|feature|breaking` (or an exact X.Y.Z, e.g. 1.0.0). Bumps the version files, dates the changelog, runs the checks, commits and tags. Pushes nothing.
 [group('release')]
 release change:
     @bun '{{ root }}/scripts/release.ts' prepare '{{ change }}'
@@ -58,6 +58,7 @@ release change:
 release-publish:
     #!/usr/bin/env bash
     set -euo pipefail
+    [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "check out main first: only main is published" >&2; exit 1; }
     tag=$(git describe --exact-match --tags --match 'v*' HEAD 2>/dev/null) || { echo "HEAD is not a release commit; run \`just release <change>\` first" >&2; exit 1; }
     bun '{{ root }}/scripts/release.ts' verify "$tag"
     git push --atomic origin main "refs/tags/$tag"
