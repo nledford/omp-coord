@@ -9,7 +9,9 @@ An [omp](https://github.com/can1357/oh-my-pi) plugin, plus a small command-line 
 - **Messages, claims, pause.** Sessions message each other and each other's subagents, claim branches, worktrees and PRs against other sessions' git commands, and pause the whole project at once.
 - **Load-aware limits, ports and scratch folders, a decision log, reports** of waits, refusals and agents a crash left mid-run, and an SQLite event log.
 
-Each session gets a letter and shows `coord B · work 5/8 · short 1/2` in omp's footer.
+Each session gets a letter and shows `coord B · work 5/8 · short 1/2` in omp's footer. Here session B's agents hold both `work` slots, so session A's spawn is refused, A goes first in line, and `/coord` shows the board:
+
+![omp with omp-coord: a spawn refused because both work slots are in use, and the /coord board showing session A first in line](docs/images/spawn-refused.png)
 
 ## Quick start
 

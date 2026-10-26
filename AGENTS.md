@@ -10,6 +10,23 @@ An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord`
 - Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool.
 - `src/` changes that move the CLI need `just unlink && just link` so `~/.bun/bin/omp-coord` follows.
 
+## Screenshots
+
+Images under `docs/images/` are real omp sessions in a neutral demo project, never a real project or the real state folder. Retake them when the text they show changes.
+
+Prerequisites (Homebrew):
+
+- `brew install tmux resvg charmbracelet/tap/freeze`
+- `brew install --cask font-jetbrains-mono-nerd-font` (omp's status-line icons)
+- an omp with a working model, since the demo sessions run real agents.
+
+Steps:
+
+1. `just demo` creates `/tmp/demo-shop` (2 `work` slots, scratch state folder) and starts sessions `demo-a` (A) and `demo-b` (B) in tmux.
+2. Drive them with `tmux send-keys`. For the two current images: in `demo-b`, "Spawn two task subagents named CatalogTests and CheckoutFix (do not wait for them). Each one's task: run bash sleep 600, then reply done. Then stop."; in `demo-a`, "Spawn one task subagent named PriceAudit whose task is: reply done. If omp-coord refuses it, report the refusal in one short sentence and stop.", then `/coord` → `spawn-refused.png`; in `demo-b`, "Cancel the CheckoutFix subagent now (stop its job); leave CatalogTests running. Then stop." → `slot-held.png` from `demo-a`.
+3. `just screenshot demo-a docs/images/<name>.png [first-line [last-line]]` renders the pane. The host name is replaced with `demo-mac`; check the image for anything else personal before committing.
+4. `just demo-stop`.
+
 ## Layout: hexagonal, around a functional core
 
 Dependencies point inward only: adapters → app → domain. The domain imports nothing outside itself, except `node:path`'s pure path arithmetic in `claims.ts`; the app imports only the domain and its own ports. Facts about the machine (the home folder, which folders are worktree roots) are passed in by adapters.

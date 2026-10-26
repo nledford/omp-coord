@@ -85,3 +85,34 @@ omp-dev state='/tmp/omp-coord-dev/state':
 [group('dev')]
 events scope state='/tmp/omp-coord-dev/state':
     sqlite3 -column -header '{{ state }}/{{ scope }}.db' "select datetime(at/1000,'unixepoch','localtime') t, type, label, data from events order by id"
+
+# Start a neutral demo for screenshots: /tmp/demo-shop (2 work slots, scratch state) and two omp sessions in tmux, `demo-a` and `demo-b`.
+[group('docs')]
+demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    project=/tmp/demo-shop state=/tmp/demo-shop-state
+    rm -rf "$project" "$state" && mkdir -p "$project" "$state" && cd "$project"
+    git init -q -b main && printf '# demo-shop\n' > README.md && git add -A
+    git -c user.name=demo -c user.email=demo@example.com commit -qm init
+    printf '%s\n' '{' '  "scope": "demo-shop",' \
+      '  "agents": { "pools": { "work": { "cap": 2 } }, "exempt": ["reviewer"] },' \
+      '  "queues": { "build": { "slots": 1, "order": "fair-share" } },' \
+      '  "commands": [{ "pattern": "(^|\\s)npm run build\\b", "action": "queue", "queue": "build" }]' '}' > .omp-coord.json
+    for s in demo-a demo-b; do
+      tmux new-session -d -s "$s" -x 110 -y 32 -c "$project" "OMP_COORD_STATE_DIR=$state exec omp --no-extensions -e '{{ root }}/src/index.ts'"
+      sleep 4
+    done
+    echo "Sessions demo-a and demo-b are running in $project; drive them with tmux attach -t demo-a (see AGENTS.md, Screenshots)."
+
+# Render a tmux pane to a PNG, e.g. `just screenshot demo-b docs/images/spawn-refused.png 1 32`.
+[group('docs')]
+screenshot target out first='1' last='$':
+    '{{ root }}/scripts/screenshot.sh' '{{ target }}' '{{ out }}' '{{ first }}' '{{ last }}'
+
+# Stop the demo sessions and delete the demo project and its state.
+[group('docs')]
+demo-stop:
+    -tmux kill-session -t demo-a
+    -tmux kill-session -t demo-b
+    rm -rf /tmp/demo-shop /tmp/demo-shop-state
