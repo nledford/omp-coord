@@ -3,10 +3,13 @@
  * session's working directory (so every worktree under a checkout shares the checkout's file), or named by the
  * `OMP_COORD_CONFIG` environment variable. Without one, the extension stays inactive.
  */
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { CommandRule } from "./domain/commands.ts";
+import type { LoadLimit } from "./domain/limits.ts";
 import type { AgentPolicy } from "./domain/model.ts";
+import type { PortPolicy } from "./domain/ports.ts";
 import type { QueuePolicy, Queues } from "./domain/queues.ts";
 
 export const CONFIG_FILE = ".omp-coord.json";
@@ -16,12 +19,16 @@ export interface Config {
   scope: string;
   /** Where the file was read from. */
   source: string;
+  /** Hash of the file's text: sessions of one scope compare it to notice they read different files. */
+  hash: string;
   agents: AgentPolicy;
   /** Rules for agents' bash commands, first match wins. */
   commands: CommandRule[];
   /** Build and test queues, machine-wide within the scope. */
   queues: Queues;
-  /** Retention of the event log. */
+  /** Port ranges and scratch folders handed to sessions and their agents. */
+  resources: { ports: PortPolicy | undefined; scratch: string | undefined };
+  /** Retention of the event log and the decision log. */
   history: { maxAgeMs: number; maxEvents: number };
 }
 
@@ -38,17 +45,19 @@ export function findConfigFile(cwd: string, env: Record<string, string | undefin
 }
 
 export function loadConfig(path: string): Config {
+  let text: string;
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    text = readFileSync(path, "utf8");
+    raw = JSON.parse(text);
   } catch (e) {
     throw new ConfigError(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return parseConfig(raw, path);
+  return parseConfig(raw, path, createHash("sha256").update(text).digest("hex").slice(0, 16));
 }
 
 /** Validates a parsed config file. Errors name the offending field. */
-export function parseConfig(raw: unknown, source: string): Config {
+export function parseConfig(raw: unknown, source: string, hash = "none"): Config {
   const fail = (field: string, problem: string): never => {
     throw new ConfigError(`${source}: ${field} ${problem}`);
   };
@@ -68,7 +77,11 @@ export function parseConfig(raw: unknown, source: string): Config {
       if (other) fail(`agents.pools.${name}.agentTypes`, `lists "${t}", which pool ${other} already lists`);
       claimed.set(t, name);
     }
-    pools[name] = { cap: count(p.cap, `agents.pools.${name}.cap`, fail), agentTypes };
+    pools[name] = {
+      cap: count(p.cap, `agents.pools.${name}.cap`, fail),
+      agentTypes,
+      loadCaps: loadLimits(p.loadCaps ?? [], `agents.pools.${name}.loadCaps`, "cap", fail),
+    };
   }
   if (Object.keys(pools).length === 0) fail("agents.pools", "needs at least one pool");
 
@@ -98,6 +111,8 @@ export function parseConfig(raw: unknown, source: string): Config {
       lanes,
       agingMs: q.agingMinutes === undefined ? null : count(q.agingMinutes, `queues.${name}.agingMinutes`, fail) * 60_000,
       onDuplicate: onDuplicate as QueuePolicy["onDuplicate"],
+      timeoutMs: q.timeoutMinutes === undefined ? null : count(q.timeoutMinutes, `queues.${name}.timeoutMinutes`, fail) * 60_000,
+      loadSlots: loadLimits(q.loadSlots ?? [], `queues.${name}.loadSlots`, "slots", fail),
     };
   }
 
@@ -121,9 +136,26 @@ export function parseConfig(raw: unknown, source: string): Config {
     return { pattern, action: "queue", queue, lane };
   });
 
+  const resources = obj(root.resources ?? {}, "resources", fail);
+  let ports: PortPolicy | undefined;
+  if (resources.ports !== undefined) {
+    const p = obj(resources.ports, "resources.ports", fail);
+    ports = {
+      from: count(p.from, "resources.ports.from", fail),
+      to: count(p.to, "resources.ports.to", fail),
+      perSession: count(p.perSession, "resources.ports.perSession", fail),
+      perAgent: count(p.perAgent ?? 10, "resources.ports.perAgent", fail),
+    };
+    if (ports.to > 65_535 || ports.from > ports.to) fail("resources.ports", "must have from ≤ to ≤ 65535");
+    if (ports.perSession > ports.to - ports.from + 1) fail("resources.ports.perSession", "is larger than the whole range");
+    if (ports.perAgent > ports.perSession) fail("resources.ports.perAgent", "is larger than perSession");
+  }
+  const scratch = resources.scratch === undefined ? undefined : resolve(dirname(source), str(resources.scratch, "resources.scratch", fail));
+
   return {
     scope,
     source,
+    hash,
     agents: {
       pools,
       defaultPool: defaultPool as string,
@@ -138,6 +170,7 @@ export function parseConfig(raw: unknown, source: string): Config {
     },
     commands,
     queues,
+    resources: { ports, scratch },
     history: {
       maxAgeMs: count(history.retentionDays ?? 30, "history.retentionDays", fail) * 24 * 3_600_000,
       maxEvents: count(history.maxEvents ?? 100_000, "history.maxEvents", fail),
@@ -174,4 +207,14 @@ function count(v: unknown, field: string, fail: Fail, min = 1): number {
 /** omp reports agent types lowercased (`ctx.agent.name`), so configured ones are compared lowercased too. */
 function agentTypeList(v: unknown, field: string, fail: Fail): string[] {
   return strList(v, field, fail).map(t => t.toLowerCase());
+}
+
+/** `[{ "above": 150, "<limitKey>": 1 }, …]` → load limits; a limit may be 0 (nothing starts under that load). */
+function loadLimits(v: unknown, field: string, limitKey: "cap" | "slots", fail: Fail): LoadLimit[] {
+  return list(v, field, fail).map((x, i) => {
+    const rule = obj(x, `${field}[${i}]`, fail);
+    const above = rule.above;
+    if (typeof above !== "number" || !Number.isFinite(above) || above < 0) fail(`${field}[${i}].above`, "must be a load average of at least 0");
+    return { above: above as number, limit: count(rule[limitKey], `${field}[${i}].${limitKey}`, fail, 0) };
+  });
 }

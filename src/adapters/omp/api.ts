@@ -61,6 +61,7 @@ export interface Events {
 
 export interface ZodString {
   describe(description: string): ZodString;
+  optional(): ZodString;
 }
 
 export interface ExtensionAPI {

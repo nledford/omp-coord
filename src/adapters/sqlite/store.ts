@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BoardRepository } from "../../app/ports.ts";
-import { type Board, type BoardEvent, emptyBoard } from "../../domain/model.ts";
+import { type Board, type BoardEvent, type Note, emptyBoard } from "../../domain/model.ts";
 
 /** How long the event log keeps events. */
 export interface Retention {
@@ -22,17 +22,22 @@ export interface Retention {
 export const DEFAULT_RETENTION: Retention = { maxAgeMs: 30 * 24 * 3_600_000, maxEvents: 100_000 };
 
 const PRUNE_INTERVAL_MS = 3_600_000;
+/** Notes loaded with the board; enough for numbering and recent display. */
+const NOTES_LOADED = 50;
 
 const SCHEMA_VERSION = 1;
 
 const SCHEMA = `
 CREATE TABLE sessions (
-  id         TEXT PRIMARY KEY,
-  label      TEXT NOT NULL UNIQUE,
-  pid        INTEGER NOT NULL,
-  cwd        TEXT NOT NULL,
-  socket     TEXT NOT NULL,
-  started_at INTEGER NOT NULL
+  id          TEXT PRIMARY KEY,
+  label       TEXT NOT NULL UNIQUE,
+  pid         INTEGER NOT NULL,
+  cwd         TEXT NOT NULL,
+  socket      TEXT NOT NULL,
+  started_at  INTEGER NOT NULL,
+  config_hash TEXT NOT NULL,
+  ports_from  INTEGER,
+  ports_to    INTEGER
 ) STRICT;
 CREATE TABLE slots (
   id         INTEGER PRIMARY KEY,
@@ -53,11 +58,12 @@ CREATE TABLE tickets (
   PRIMARY KEY (session_id, pool)
 ) STRICT;
 CREATE TABLE messages (
-  id      INTEGER PRIMARY KEY,
-  from_id TEXT NOT NULL,
-  to_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  text    TEXT NOT NULL,
-  sent_at INTEGER NOT NULL
+  id       INTEGER PRIMARY KEY,
+  from_id  TEXT NOT NULL,
+  to_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  to_agent TEXT,
+  text     TEXT NOT NULL,
+  sent_at  INTEGER NOT NULL
 ) STRICT;
 CREATE TABLE sent (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -81,6 +87,40 @@ CREATE TABLE queue_served (
   queue TEXT NOT NULL,
   owner TEXT,
   at    INTEGER NOT NULL
+) STRICT;
+CREATE TABLE pause (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  by_session TEXT,
+  reason     TEXT NOT NULL,
+  since      INTEGER NOT NULL
+) STRICT;
+CREATE TABLE claims (
+  kind       TEXT NOT NULL CHECK (kind IN ('branch', 'worktree', 'pr')),
+  target     TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  agent_id   TEXT NOT NULL,
+  note       TEXT NOT NULL,
+  since      INTEGER NOT NULL,
+  PRIMARY KEY (kind, target)
+) STRICT;
+CREATE TABLE agent_ports (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  agent_id   TEXT NOT NULL,
+  from_port  INTEGER NOT NULL,
+  to_port    INTEGER NOT NULL,
+  PRIMARY KEY (session_id, agent_id)
+) STRICT;
+CREATE TABLE machine_load (
+  id    INTEGER PRIMARY KEY CHECK (id = 1),
+  value REAL NOT NULL,
+  at    INTEGER NOT NULL
+) STRICT;
+CREATE TABLE notes (
+  id     INTEGER PRIMARY KEY,
+  at     INTEGER NOT NULL,
+  label  TEXT,
+  author TEXT NOT NULL,
+  text   TEXT NOT NULL
 ) STRICT;
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY,
@@ -167,7 +207,15 @@ export class BoardStore implements BoardRepository {
     this.#db
       .query("DELETE FROM events WHERE id <= (SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?)")
       .run(this.#retention.maxEvents);
+    // The decision log follows the same age limit.
+    this.#db.query("DELETE FROM notes WHERE at < ?").run(now - this.#retention.maxAgeMs);
     this.#db.query("INSERT INTO meta (key, value) VALUES ('events_pruned_at', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(String(now));
+  }
+
+  notes(limit: number): Note[] {
+    return this.#db
+      .query<Note, [number]>("SELECT * FROM (SELECT * FROM notes ORDER BY id DESC LIMIT ?) ORDER BY id")
+      .all(limit);
   }
 
   close(): void {
@@ -194,9 +242,21 @@ export class BoardStore implements BoardRepository {
     return {
       ...emptyBoard(),
       sessions: db
-        .query<{ id: string; label: string; pid: number; cwd: string; socket: string; started_at: number }, []>("SELECT * FROM sessions")
+        .query<
+          { id: string; label: string; pid: number; cwd: string; socket: string; started_at: number; config_hash: string; ports_from: number | null; ports_to: number | null },
+          []
+        >("SELECT * FROM sessions")
         .all()
-        .map(r => ({ id: r.id, label: r.label, pid: r.pid, cwd: r.cwd, socket: r.socket, startedAt: r.started_at })),
+        .map(r => ({
+          id: r.id,
+          label: r.label,
+          pid: r.pid,
+          cwd: r.cwd,
+          socket: r.socket,
+          startedAt: r.started_at,
+          configHash: r.config_hash,
+          ports: r.ports_from === null || r.ports_to === null ? undefined : { from: r.ports_from, to: r.ports_to },
+        })),
       slots: db
         .query<
           { session_id: string; agent_id: string | null; parent_id: string; agent_type: string; pool: string | null; state: "starting" | "running"; since: number },
@@ -217,9 +277,9 @@ export class BoardStore implements BoardRepository {
         .all()
         .map(r => ({ sessionId: r.session_id, pool: r.pool, since: r.since, holdUntil: r.hold_until ?? undefined, notified: r.notified === 1 })),
       messages: db
-        .query<{ from_id: string; to_id: string; text: string; sent_at: number }, []>("SELECT * FROM messages ORDER BY id")
+        .query<{ from_id: string; to_id: string; to_agent: string | null; text: string; sent_at: number }, []>("SELECT * FROM messages ORDER BY id")
         .all()
-        .map(r => ({ fromId: r.from_id, toId: r.to_id, text: r.text, sentAt: r.sent_at })),
+        .map(r => ({ fromId: r.from_id, toId: r.to_id, toAgent: r.to_agent ?? undefined, text: r.text, sentAt: r.sent_at })),
       sent: db
         .query<{ session_id: string; at: number }, []>("SELECT * FROM sent")
         .all()
@@ -258,22 +318,48 @@ export class BoardStore implements BoardRepository {
           startedAt: r.started_at ?? undefined,
         })),
       served: db.query<{ queue: string; owner: string | null; at: number }, []>("SELECT * FROM queue_served").all(),
+      pause: (() => {
+        const r = db.query<{ by_session: string | null; reason: string; since: number }, []>("SELECT * FROM pause").get();
+        return r ? { by: r.by_session, reason: r.reason, since: r.since } : undefined;
+      })(),
+      claims: db
+        .query<{ kind: "branch" | "worktree" | "pr"; target: string; session_id: string; agent_id: string; note: string; since: number }, []>("SELECT * FROM claims")
+        .all()
+        .map(r => ({ kind: r.kind, target: r.target, sessionId: r.session_id, agentId: r.agent_id, note: r.note, since: r.since })),
+      agentPorts: db
+        .query<{ session_id: string; agent_id: string; from_port: number; to_port: number }, []>("SELECT * FROM agent_ports")
+        .all()
+        .map(r => ({ sessionId: r.session_id, agentId: r.agent_id, from: r.from_port, to: r.to_port })),
+      load: db.query<{ value: number; at: number }, []>("SELECT value, at FROM machine_load").get() ?? undefined,
+      // The most recent notes only: older ones stay in the table for `/coord notes all` and SQL.
+      notes: db
+        .query<{ id: number; at: number; label: string | null; author: string; text: string }, []>(
+          `SELECT * FROM (SELECT * FROM notes ORDER BY id DESC LIMIT ${NOTES_LOADED}) ORDER BY id`,
+        )
+        .all(),
     };
   }
 
-  /** Replaces the state tables with the board (a few dozen rows at most) and appends its events. */
+  /**
+   * Replaces the state tables with the board (a few dozen rows at most) and appends its events. Notes are append-only:
+   * only new ones are written, and old ones stay until retention removes them.
+   */
   #save(board: Board): void {
     const db = this.#db;
-    for (const table of ["sent", "messages", "tickets", "slots", "sessions", "jobs", "queue_served"]) db.exec(`DELETE FROM ${table}`);
+    for (const table of ["sent", "messages", "tickets", "slots", "claims", "agent_ports", "sessions", "jobs", "queue_served", "pause", "machine_load"]) {
+      db.exec(`DELETE FROM ${table}`);
+    }
 
-    const session = db.query("INSERT INTO sessions (id, label, pid, cwd, socket, started_at) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const s of board.sessions) session.run(s.id, s.label, s.pid, s.cwd, s.socket, s.startedAt);
+    const session = db.query(
+      "INSERT INTO sessions (id, label, pid, cwd, socket, started_at, config_hash, ports_from, ports_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const s of board.sessions) session.run(s.id, s.label, s.pid, s.cwd, s.socket, s.startedAt, s.configHash, s.ports?.from ?? null, s.ports?.to ?? null);
     const slot = db.query("INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since) VALUES (?, ?, ?, ?, ?, ?, ?)");
     for (const s of board.slots) slot.run(s.sessionId, s.agentId ?? null, s.parentId, s.agentType, s.pool, s.state, s.since);
     const ticket = db.query("INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)");
     for (const t of board.waitlist) ticket.run(t.sessionId, t.pool, t.since, t.holdUntil ?? null, t.notified ? 1 : 0);
-    const message = db.query("INSERT INTO messages (from_id, to_id, text, sent_at) VALUES (?, ?, ?, ?)");
-    for (const m of board.messages) message.run(m.fromId, m.toId, m.text, m.sentAt);
+    const message = db.query("INSERT INTO messages (from_id, to_id, to_agent, text, sent_at) VALUES (?, ?, ?, ?, ?)");
+    for (const m of board.messages) message.run(m.fromId, m.toId, m.toAgent ?? null, m.text, m.sentAt);
     const sent = db.query("INSERT INTO sent (session_id, at) VALUES (?, ?)");
     for (const x of board.sent) sent.run(x.sessionId, x.at);
     const job = db.query(
@@ -284,6 +370,14 @@ export class BoardStore implements BoardRepository {
     }
     const served = db.query("INSERT INTO queue_served (queue, owner, at) VALUES (?, ?, ?)");
     for (const s of board.served) served.run(s.queue, s.owner, s.at);
+    if (board.pause) db.query("INSERT INTO pause (id, by_session, reason, since) VALUES (1, ?, ?, ?)").run(board.pause.by, board.pause.reason, board.pause.since);
+    const claim = db.query("INSERT INTO claims (kind, target, session_id, agent_id, note, since) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const c of board.claims) claim.run(c.kind, c.target, c.sessionId, c.agentId, c.note, c.since);
+    const ports = db.query("INSERT INTO agent_ports (session_id, agent_id, from_port, to_port) VALUES (?, ?, ?, ?)");
+    for (const p of board.agentPorts) ports.run(p.sessionId, p.agentId, p.from, p.to);
+    if (board.load) db.query("INSERT INTO machine_load (id, value, at) VALUES (1, ?, ?)").run(board.load.value, board.load.at);
+    const note = db.query("INSERT OR IGNORE INTO notes (id, at, label, author, text) VALUES (?, ?, ?, ?, ?)");
+    for (const n of board.notes) note.run(n.id, n.at, n.label, n.author, n.text);
 
     const event = db.query("INSERT INTO events (at, type, session_id, label, data) VALUES (?, ?, ?, ?, ?)");
     for (const e of board.events) event.run(e.at, e.type, e.sessionId, e.label, JSON.stringify(e.data));

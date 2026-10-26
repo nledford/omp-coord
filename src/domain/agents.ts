@@ -2,6 +2,8 @@
  * Agent slots: pools with caps shared by every session, the line of sessions refused a slot, slots held for the
  * session first in line, and what subagents may start themselves.
  */
+import { pauseReason } from "./control.ts";
+import { currentLoad, limitUnderLoad } from "./limits.ts";
 import { type AgentPolicy, type Board, emit } from "./model.ts";
 
 export function poolFor(policy: AgentPolicy, agentType: string): string | null {
@@ -18,8 +20,11 @@ function activeHolds(board: Board, pool: string): number {
   return board.waitlist.filter(t => t.pool === pool && t.holdUntil !== undefined).length;
 }
 
-function capOf(policy: AgentPolicy, pool: string): number {
-  return policy.pools[pool]?.cap ?? 0;
+/** A pool's cap now: lowered while the machine is under load, 0 while paused. */
+export function capOf(board: Board, policy: AgentPolicy, pool: string, now: number): number {
+  const p = policy.pools[pool];
+  if (!p || board.pause) return 0;
+  return limitUnderLoad(p.cap, p.loadCaps, currentLoad(board, now));
 }
 
 export interface SpawnRequest {
@@ -69,14 +74,14 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
   }
 
   const mine = board.waitlist.find(t => t.sessionId === req.sessionId && t.pool === pool);
-  if (mine?.holdUntil !== undefined) {
+  if (mine?.holdUntil !== undefined && !board.pause) {
     board.waitlist = board.waitlist.filter(t => t !== mine);
     emit(board, req.now, "hold_used", req.sessionId, { pool, waitedMs: req.now - mine.since });
     addStartingSlot(board, req, pool);
     return { allowed: true, pool };
   }
 
-  const cap = capOf(policy, pool);
+  const cap = capOf(board, policy, pool, req.now);
   if (used(board, pool) + activeHolds(board, pool) < cap && !mine) {
     addStartingSlot(board, req, pool);
     return { allowed: true, pool };
@@ -87,15 +92,18 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
   const line = board.waitlist.filter(t => t.pool === pool).sort((a, b) => a.since - b.since);
   const position = line.indexOf(ticket) + 1;
   emit(board, req.now, "spawn_refused", req.sessionId, { agentType: req.agentType, pool, position, used: used(board, pool), cap });
+  const normal = policy.pools[pool]?.cap ?? 0;
+  const load = currentLoad(board, req.now);
+  const why = board.pause
+    ? `${pauseReason(board)}. No new agents start until it resumes`
+    : `FULL: ${used(board, pool)}/${cap} ${pool} slots are in use across all sessions` +
+      (cap < normal ? ` (the cap is lowered from ${normal} at load ${load})` : "") +
+      (activeHolds(board, pool) ? ` and ${activeHolds(board, pool)} more held for sessions ahead in line` : "");
   return {
     allowed: false,
     pool,
     position,
-    reason:
-      `FULL: ${used(board, pool)}/${cap} ${pool} slots are in use across all sessions` +
-      (activeHolds(board, pool) ? ` and ${activeHolds(board, pool)} more held for sessions ahead in line` : "") +
-      `. This session is #${position} in line for a ${pool} slot. Start nothing else now; ` +
-      `you will get a message when a slot is held for you.`,
+    reason: `${why}. This session is #${position} in line for a ${pool} slot. Start nothing else now; you will get a message when a slot is held for you.`,
   };
 }
 
@@ -162,7 +170,7 @@ export function agentStarted(
     };
     board.slots.push(slot);
   }
-  const count = slot.pool === null ? null : { pool: slot.pool, used: used(board, slot.pool), cap: capOf(policy, slot.pool) };
+  const count = slot.pool === null ? null : { pool: slot.pool, used: used(board, slot.pool), cap: capOf(board, policy, slot.pool, a.now) };
   emit(board, a.now, "run_started", a.sessionId, { agentId: a.agentId, agentType: a.agentType, ...(count ?? { pool: null }), revived });
   return count;
 }
@@ -193,7 +201,7 @@ export function expire(board: Board, policy: AgentPolicy, now: number): void {
 /** Holds freed slots for the sessions longest in line. Runs after anything that may free a slot. */
 export function grantHolds(board: Board, policy: AgentPolicy, now: number): void {
   for (const pool of Object.keys(policy.pools)) {
-    let free = capOf(policy, pool) - used(board, pool) - activeHolds(board, pool);
+    let free = capOf(board, policy, pool, now) - used(board, pool) - activeHolds(board, pool);
     const waiting = board.waitlist
       .filter(t => t.pool === pool && t.holdUntil === undefined)
       .sort((a, b) => a.since - b.since);

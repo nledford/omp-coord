@@ -7,7 +7,7 @@ import { ConfigError, findConfigFile, parseConfig } from "../src/config.ts";
 describe("config", () => {
   test("a minimal file gets one work pool of 8, and subagents may start only the exempt types", () => {
     const c = parseConfig({ scope: "proj", agents: { exempt: ["reviewer"] } }, "/x/.omp-coord.json");
-    expect(c.agents.pools).toEqual({ work: { cap: 8, agentTypes: [] } });
+    expect(c.agents.pools).toEqual({ work: { cap: 8, agentTypes: [], loadCaps: [] } });
     expect(c.agents.defaultPool).toBe("work");
     expect(c.agents.nested).toEqual({ allow: ["reviewer"], maxRunningPerParent: 1 });
   });
@@ -52,8 +52,24 @@ describe("config", () => {
 
   test("queues default to FIFO in one lane, refusing duplicates", () => {
     const c = parseConfig({ scope: "p", queues: { heavy: { slots: 2 } } }, "f");
-    expect(c.queues.heavy).toEqual({ slots: 2, order: "fifo", lanes: ["normal"], agingMs: null, onDuplicate: "refuse" });
+    expect(c.queues.heavy).toEqual({ slots: 2, order: "fifo", lanes: ["normal"], agingMs: null, onDuplicate: "refuse", timeoutMs: null, loadSlots: [] });
     expect(() => parseConfig({ scope: "p", queues: { heavy: { slots: 2, order: "lifo" } } }, "f")).toThrow(/queues\.heavy\.order/);
+  });
+
+  test("load limits, time limits and resources are read, with ports checked for sense", () => {
+    const c = parseConfig(
+      {
+        scope: "p",
+        agents: { pools: { work: { cap: 8, loadCaps: [{ above: 150, cap: 4 }] } } },
+        queues: { heavy: { slots: 2, timeoutMinutes: 120, loadSlots: [{ above: 150, slots: 0 }] } },
+        resources: { ports: { from: 18700, to: 18999, perSession: 100 }, scratch: "scratch" },
+      },
+      "/cfg/.omp-coord.json",
+    );
+    expect(c.agents.pools.work?.loadCaps).toEqual([{ above: 150, limit: 4 }]);
+    expect(c.queues.heavy).toMatchObject({ timeoutMs: 120 * 60_000, loadSlots: [{ above: 150, limit: 0 }] });
+    expect(c.resources).toEqual({ ports: { from: 18700, to: 18999, perSession: 100, perAgent: 10 }, scratch: "/cfg/scratch" });
+    expect(() => parseConfig({ scope: "p", resources: { ports: { from: 19000, to: 18000, perSession: 10 } } }, "f")).toThrow(/resources\.ports/);
   });
 
   test("a command rule must name a queue and lane that exist", () => {

@@ -2,7 +2,7 @@
  * What the application needs from the outside world. Adapters implement these (`adapters/sqlite`, `adapters/unix`,
  * the runner's process spawning); tests use in-memory fakes.
  */
-import type { Board, BoardEvent } from "../domain/model.ts";
+import type { Board, BoardEvent, Note } from "../domain/model.ts";
 
 /** The shared board of one scope. Every change runs `change` on the current board and saves it atomically. */
 export interface BoardRepository {
@@ -10,6 +10,8 @@ export interface BoardRepository {
   read(): Board;
   /** Event log, oldest first, from `since` on. */
   events(since?: number): BoardEvent[];
+  /** The newest `limit` decision-log notes, oldest first. */
+  notes(limit: number): Note[];
   close(): void;
 }
 
@@ -29,4 +31,9 @@ export interface Listener {
 
 export interface Clock {
   now(): number;
+}
+
+/** The machine's 1-minute load average, or undefined where the platform has none. */
+export interface LoadProbe {
+  load(): number | undefined;
 }

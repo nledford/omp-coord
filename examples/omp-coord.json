@@ -2,7 +2,7 @@
   "scope": "lightcraft",
   "agents": {
     "pools": {
-      "work": { "cap": 8 },
+      "work": { "cap": 8, "loadCaps": [{ "above": 150, "cap": 4 }] },
       "short": { "cap": 2, "agentTypes": ["scout"] }
     },
     "defaultPool": "work",
@@ -12,8 +12,19 @@
     "startTimeoutSeconds": 120
   },
   "queues": {
-    "heavy": { "slots": 2, "order": "fair-share", "lanes": ["front", "normal"], "agingMinutes": 15 },
-    "test": { "slots": 3, "order": "fair-share", "agingMinutes": 10 }
+    "heavy": {
+      "slots": 2,
+      "order": "fair-share",
+      "lanes": ["front", "normal"],
+      "agingMinutes": 15,
+      "timeoutMinutes": 120,
+      "loadSlots": [{ "above": 150, "slots": 1 }]
+    },
+    "test": { "slots": 3, "order": "fair-share", "agingMinutes": 10, "timeoutMinutes": 60 }
+  },
+  "resources": {
+    "ports": { "from": 18700, "to": 19999, "perSession": 200, "perAgent": 10 },
+    "scratch": "/tmp/lightcraft-scratch"
   },
   "messages": { "perMinute": 10 },
   "history": { "retentionDays": 30, "maxEvents": 100000 },

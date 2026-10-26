@@ -6,11 +6,12 @@
  * Pure state over a plain, JSON-serializable `Board`. Persistence and clocks live outside: callers pass `now`
  * (ms since epoch) and run each transition inside one store transaction.
  */
+import type { LoadLimit } from "./limits.ts";
 
 /** How many agents may run at once, and which agent types fall where. */
 export interface AgentPolicy {
-  /** Pools of slots: each has a cap shared by every session, and the agent types it covers. */
-  pools: Record<string, { cap: number; agentTypes: string[] }>;
+  /** Pools of slots: each has a cap shared by every session, the agent types it covers, and lower caps under load. */
+  pools: Record<string, { cap: number; agentTypes: string[]; loadCaps: LoadLimit[] }>;
   /** Pool for agent types no pool lists. */
   defaultPool: string;
   /** Agent types that never take a slot (read-only reviewers). */
@@ -34,6 +35,52 @@ export interface SessionRecord {
   /** Unix socket the session listens on while it lives; how other sessions tell it is gone. */
   socket: string;
   startedAt: number;
+  /** Hash of the config file the session read, so sessions of one scope can tell when they disagree. */
+  configHash: string;
+  /** Port range handed to this session, when the scope hands out ports. */
+  ports: PortRange | undefined;
+}
+
+export interface PortRange {
+  from: number;
+  /** Inclusive. */
+  to: number;
+}
+
+/** Ports one agent took from its session's range. */
+export interface AgentPorts extends PortRange {
+  sessionId: string;
+  agentId: string;
+}
+
+/** While set, no new agent spawn (except outside the caps) and no queued job starts, in any session. */
+export interface Pause {
+  /** The session that paused, or null (`omp-coord pause` from a terminal). */
+  by: string | null;
+  reason: string;
+  since: number;
+}
+
+/** A session's claim on something other sessions must leave alone. */
+export interface Claim {
+  kind: "branch" | "worktree" | "pr";
+  /** Branch name, absolute worktree path, or PR number. */
+  target: string;
+  sessionId: string;
+  /** The agent that claimed it, or `Main`. */
+  agentId: string;
+  note: string;
+  since: number;
+}
+
+/** An entry in the shared decision log. */
+export interface Note {
+  id: number;
+  at: number;
+  /** Session letter when written, or null from outside omp. */
+  label: string | null;
+  author: string;
+  text: string;
 }
 
 /** One agent's hold on a pool slot. `pool: null` for agents outside the caps (exempt and nested reviewers). */
@@ -63,6 +110,8 @@ export interface Ticket {
 export interface Message {
   fromId: string;
   toId: string;
+  /** For a subagent of the recipient session (by agent id); its main session otherwise. */
+  toAgent: string | undefined;
   text: string;
   sentAt: number;
 }
@@ -89,7 +138,13 @@ export interface BoardEvent {
     | "job_ended"
     | "job_lost"
     | "job_superseded"
-    | "job_reprioritized";
+    | "job_reprioritized"
+    | "paused"
+    | "resumed"
+    | "claimed"
+    | "released"
+    | "claim_refused"
+    | "note_added";
   /** The omp session concerned; null for build jobs started outside any omp session. */
   sessionId: string | null;
   /** The session's letter when the event happened. */
@@ -127,12 +182,32 @@ export interface Board {
   jobs: Job[];
   /** When each owner last had a job started in each queue, for fair share. */
   served: { queue: string; owner: string | null; at: number }[];
+  pause: Pause | undefined;
+  claims: Claim[];
+  notes: Note[];
+  agentPorts: AgentPorts[];
+  /** The latest load average any process on this machine measured (see `limits.ts`). */
+  load: { value: number; at: number } | undefined;
   /** Events since the board was loaded, oldest first. Not board state: the store moves them to the log. */
   events: BoardEvent[];
 }
 
 export function emptyBoard(): Board {
-  return { sessions: [], slots: [], waitlist: [], messages: [], sent: [], jobs: [], served: [], events: [] };
+  return {
+    sessions: [],
+    slots: [],
+    waitlist: [],
+    messages: [],
+    sent: [],
+    jobs: [],
+    served: [],
+    pause: undefined,
+    claims: [],
+    notes: [],
+    agentPorts: [],
+    load: undefined,
+    events: [],
+  };
 }
 
 /** Appends an event to the board's log. For transitions in the domain modules only. */

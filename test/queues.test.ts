@@ -13,7 +13,7 @@ import {
 
 const MIN = 60_000;
 
-const base: QueuePolicy = { slots: 1, order: "fifo", lanes: ["front", "normal"], agingMs: null, onDuplicate: "refuse" };
+const base: QueuePolicy = { slots: 1, order: "fifo", lanes: ["front", "normal"], agingMs: null, onDuplicate: "refuse", timeoutMs: null, loadSlots: [] };
 const queues = (p: Partial<QueuePolicy> = {}) => ({ heavy: { ...base, ...p } });
 
 let next = 0;
@@ -179,7 +179,7 @@ describe("event log", () => {
 describe("fair-share history", () => {
   test("a session that ends takes its turn history with it", () => {
     const board = emptyBoard();
-    registerSession(board, { id: "s", pid: 1, cwd: "/w", socket: "/s/s", now: 0 });
+    registerSession(board, { id: "s", pid: 1, cwd: "/w", socket: "/s/s", configHash: "h", now: 0 });
     const a = enqueue(board, queues({ order: "fair-share" }), { owner: "s" });
     jobEnded(board, queues({ order: "fair-share" }), { id: a.id, exitCode: 0, now: 1 });
     expect(board.served).toHaveLength(1);

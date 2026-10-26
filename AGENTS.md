@@ -15,18 +15,22 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 
 | Path | Role |
 |---|---|
-| `src/domain/model.ts` | The `Board` (sessions, agent slots, the line, messages, jobs), policy types, `BoardEvent` and `emit`. |
+| `src/domain/model.ts` | The `Board` (sessions, agent slots, the line, messages, jobs, pause, claims, notes, port blocks, the latest load), policy types, `BoardEvent` and `emit`. |
 | `src/domain/sessions.ts`, `agents.ts`, `messages.ts`, `queues.ts` | Pure transitions over the `Board`, one concern each. No I/O, no clock; callers pass `now`. Transitions append `BoardEvent`s. |
+| `src/domain/control.ts`, `limits.ts`, `claims.ts`, `notes.ts`, `ports.ts` | Pause and resume; load-aware limits; claims and the command-text guard; the decision log; port blocks. |
+| `src/domain/history.ts` | Reports from the event log: agents interrupted by a session leaving, daily statistics. |
 | `src/domain/commands.ts` | Decides what happens to an agent's bash command: allow, refuse, or rewrite to run through a queue. |
-| `src/app/ports.ts` | What the app needs from outside: `BoardRepository`, `Liveness`, `Listener`, `Clock`. |
-| `src/app/coordinator.ts` | Session use cases: join, leave, tick, spawn decisions, agent runs, messages, job priority, pruning dead sessions and jobs. |
-| `src/app/job-runner.ts` | The runner use case: join a queue, wait (dropping dead runners), run, leave with the exit code. |
-| `src/config.ts` | Finds and validates `.omp-coord.json` into domain policy types. Errors name the field. |
-| `src/adapters/sqlite/store.ts` | `BoardRepository` on SQLite: state tables, the event log, schema version, retention. |
+| `src/app/ports.ts` | What the app needs from outside: `BoardRepository`, `Liveness`, `Listener`, `Clock`, `LoadProbe`. |
+| `src/app/coordinator.ts` | Session use cases: join, leave, tick, spawn decisions, agent runs, messages, pause, claims, notes, ports, reports, pruning dead sessions and jobs. |
+| `src/app/job-runner.ts` | The runner use case: join a queue, wait (dropping dead runners, recording load), run within the time limit, leave with the exit code. |
+| `src/app/doctor.ts` | `omp-coord doctor`'s checks and fixes. |
+| `src/config.ts` | Finds and validates `.omp-coord.json` into domain policy types, and hashes it. Errors name the field. |
+| `src/adapters/sqlite/store.ts` | `BoardRepository` on SQLite: state tables, the event log, the decision log, schema version, retention. |
 | `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
-| `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION` so runners started from the session's bash calls are its own. |
-| `src/adapters/cli/cli.ts` | `omp-coord run` and `status`: argument parsing, signals and process spawning around `runJob`; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for the command. |
-| `src/adapters/text/report.ts` | Text for `/coord`, `coord_status`, `omp-coord status` and the footer. |
+| `src/adapters/os/load.ts` | `LoadProbe` from the 1-minute load average. |
+| `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run. Keeps each subagent's binding to deliver messages to it. |
+| `src/adapters/cli/cli.ts` | `omp-coord` subcommands: argument parsing, signals, time limits and process spawning around the use cases; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for a queued command. |
+| `src/adapters/text/report.ts` | Text for `/coord`, the tools, the `omp-coord` subcommands and the footer. |
 
 New behavior goes in the domain (rules) and the app (use cases), with tests there; adapters only translate. Test the app with the fakes in `test/support/fakes.ts`.
 
@@ -55,9 +59,10 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 - `spawnKey` is the new agent's id for `task`, eval `agent()` and workpools, but only a label for some callers (`/cleanse`), so `agentStarted` falls back to matching parent and type.
 - A `tool_call` handler that returns `{ input }` replaces the arguments the tool runs with; the agent sees the rewritten command in its transcript.
 - omp's bash tool passes the omp process's environment to commands, so `OMP_COORD_SESSION` set by the extension reaches `just` recipes run by agents.
+- `sendMessage` through a subagent's binding (captured in its `session_start`) lands in that subagent's conversation, not the main session's.
 - The installed `@oh-my-pi/pi-coding-agent` package can lag the `omp` binary (17.4.1 against 18.12.6 when this was written). That is why `src/omp-api.ts` declares the API instead of importing it. Check API facts against `omp://extensions.md` from the running omp.
 
 ## Tests
 
-- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check) and socket liveness. `test/cli.test.ts`: the runner across real processes (waiting, exit codes, duplicates, a killed runner).
+- `test/board.test.ts`: agent slots, sessions, messages and their events. `test/queues.test.ts`: queue rules. `test/features.test.ts`: pause, load limits, claims, notes, ports, subagent messages and event-log reports. `test/commands.test.ts`: command rules and quoting. `test/config.test.ts`: config. `test/app.test.ts`: use cases through in-memory fakes. `test/infra.test.ts`: the SQLite store (concurrency across processes, constraints, retention, schema check, round-trips) and socket liveness. `test/cli.test.ts`: the CLI across real processes (waiting, exit codes, duplicates, a killed runner, time limits, pause, doctor).
 - Tests that need several processes spawn `bun` children; keep them, they are the evidence that processes don't lose each other's writes or slots.

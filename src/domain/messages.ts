@@ -5,7 +5,10 @@ const MINUTE = 60_000;
 
 export type SendResult = { ok: true; delivered: string[] } | { ok: false; reason: string };
 
-/** Queues a message for one session (by letter) or every other session (`all`). */
+/**
+ * Queues a message for one session (by letter), one subagent of another session (`B/<agent id>`), or every other
+ * session (`all`).
+ */
 export function sendMessage(
   board: Board,
   policy: AgentPolicy,
@@ -16,15 +19,16 @@ export function sendMessage(
   const text = m.text.trim();
   if (!text) return { ok: false, reason: "the message is empty" };
 
-  const to = m.to.trim();
-  const targets =
-    to.toLowerCase() === "all"
-      ? board.sessions.filter(s => s.id !== m.from)
-      : board.sessions.filter(s => s.label === to.toUpperCase());
-  if (to.toUpperCase() === sender.label) return { ok: false, reason: "a session cannot message itself" };
+  const [session = "", ...rest] = m.to.trim().split("/");
+  const toAgent = rest.length ? rest.join("/").trim() : undefined;
+  if (toAgent === "") return { ok: false, reason: "name the agent after the slash, e.g. B/RebaseWave1" };
+  const all = session.toLowerCase() === "all";
+  if (all && toAgent) return { ok: false, reason: "a message to a subagent goes to one session, not all" };
+  const targets = all ? board.sessions.filter(s => s.id !== m.from) : board.sessions.filter(s => s.label === session.toUpperCase());
+  if (session.toUpperCase() === sender.label) return { ok: false, reason: "a session cannot message itself" };
   if (targets.length === 0) {
     const others = board.sessions.filter(s => s.id !== m.from).map(s => s.label);
-    return { ok: false, reason: `no session ${to}; active: ${others.length ? others.join(", ") : "none besides this one"}` };
+    return { ok: false, reason: `no session ${session}; active: ${others.length ? others.join(", ") : "none besides this one"}` };
   }
 
   board.sent = board.sent.filter(x => m.now - x.at < MINUTE);
@@ -33,16 +37,17 @@ export function sendMessage(
     return { ok: false, reason: `rate limit: at most ${policy.messagesPerMinute} messages a minute; send one summary later` };
   }
   board.sent.push({ sessionId: m.from, at: m.now });
-  for (const t of targets) board.messages.push({ fromId: m.from, toId: t.id, text, sentAt: m.now });
-  emit(board, m.now, "message_sent", m.from, { to: targets.map(t => t.label), chars: text.length });
-  return { ok: true, delivered: targets.map(t => t.label) };
+  for (const t of targets) board.messages.push({ fromId: m.from, toId: t.id, toAgent, text, sentAt: m.now });
+  const delivered = targets.map(t => (toAgent ? `${t.label}/${toAgent}` : t.label));
+  emit(board, m.now, "message_sent", m.from, { to: delivered, chars: text.length });
+  return { ok: true, delivered };
 }
 
-/** Removes and returns the messages waiting for a session, oldest first. */
-export function takeInbox(board: Board, sessionId: string): { from: string; text: string; sentAt: number }[] {
+/** Removes and returns the messages waiting for a session or its subagents, oldest first. */
+export function takeInbox(board: Board, sessionId: string): { from: string; toAgent: string | undefined; text: string; sentAt: number }[] {
   const mine = board.messages.filter(m => m.toId === sessionId);
   board.messages = board.messages.filter(m => m.toId !== sessionId);
   return mine
     .sort((a, b) => a.sentAt - b.sentAt)
-    .map(m => ({ from: labelOf(board, m.fromId) ?? "?", text: m.text, sentAt: m.sentAt }));
+    .map(m => ({ from: labelOf(board, m.fromId) ?? "?", toAgent: m.toAgent, text: m.text, sentAt: m.sentAt }));
 }

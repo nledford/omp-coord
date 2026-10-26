@@ -48,7 +48,7 @@ describe("a session pruning the board", () => {
   test("the tick re-registers a session another session dropped, under a letter", () => {
     const { repo, coordinator } = setup();
     expect(coordinator.tick(me).label).toBe("A");
-    repo.transact(b => registerSession(b, { id: "x", pid: 2, cwd: "/w", socket: "/s/x", now: 0 }));
+    repo.transact(b => registerSession(b, { id: "x", pid: 2, cwd: "/w", socket: "/s/x", configHash: "none", now: 0 }));
     repo.board.sessions = repo.board.sessions.filter(s => s.id !== "me");
     expect(coordinator.tick(me).label).toBe("A");
     expect(repo.board.sessions.map(s => s.id).sort()).toEqual(["me", "x"]);
@@ -63,13 +63,14 @@ describe("running a job through a queue", () => {
       repo,
       liveness,
       clock,
+      load: { load: () => undefined },
       listen: () => fakeListener(`/s/job-${++n}`, log),
       sleep: async ms => {
         clock.t += ms;
       },
       execute: async () => {
         log.push("execute");
-        return 3;
+        return { code: 3, timedOut: false };
       },
       stopRequested: () => undefined,
       report: line => log.push(line),

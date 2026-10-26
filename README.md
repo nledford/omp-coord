@@ -6,9 +6,15 @@ An [omp](https://github.com/can1357/oh-my-pi) extension, plus a small command-li
 - **A fair line.** A refused session joins the line for that pool. When a slot frees, it is held for the session refused first (default 5 minutes) and that session is told so; other sessions' spawns are refused meanwhile.
 - **Subagents start only reviewers.** A subagent may start only the agent types listed under `agents.nested.allow`, one at a time, outside the caps. Everything else is refused, so "no nested worker agents" is enforced rather than asked for.
 - **Session registry.** Each session gets a letter (A, B, …) and shows `coord B · work 5/8 · short 1/2` in the footer. A session that exits or crashes leaves the board within about 10 seconds, and its slots free.
-- **Messages.** `coord_send` (or `/coord send B …`) delivers a message into the other session's conversation at its next step, waking it when idle.
-- **Build and test queues.** `omp-coord run <queue> -- <command>` waits for one of the queue's slots, shared by everything on this machine in the same scope, then runs the command. `just` recipes, scripts and terminals call it; agents' matching bash commands are rewritten to go through it. Queues order waiting jobs first come first served, by fair share between sessions, or by priority, in lanes (e.g. a front lane for approved work).
+- **Messages.** `coord_send` (or `/coord send B …`) delivers a message into the other session's conversation at its next step, waking it when idle. `B/<agent id>` reaches one of that session's subagents.
+- **Build and test queues.** `omp-coord run <queue> -- <command>` waits for one of the queue's slots, shared by everything on this machine in the same scope, then runs the command, within an optional time limit. `just` recipes, scripts and terminals call it; agents' matching bash commands are rewritten to go through it. Queues order waiting jobs first come first served, by fair share between sessions, or by priority, in lanes (e.g. a front lane for approved work).
 - **Command rules.** An agent's bash command matching a configured pattern is refused with a reason (`pkill`, raw `cargo test`…) or run through a queue.
+- **Claims.** A session claims a branch, worktree or PR (`coord_claim`, `/coord claim`); other sessions' agents are refused git and gh commands that would change it until it is released or the session ends.
+- **Pause and drain.** `/coord pause [reason]` or `omp-coord pause` stops every new agent and queued job in the scope while running work finishes; `resume` lifts it.
+- **Load-aware limits.** Pools and queues can drop to lower limits while the machine's load average is above a threshold.
+- **Ports and scratch folders.** Each session gets its own port block and scratch folder (`OMP_COORD_PORTS`, `OMP_COORD_SCRATCH`); each agent gets its own share with `coord_resources`.
+- **Decision log.** `coord_note` and `/coord note` record decisions every session sees.
+- **Reports.** `/coord interrupted` lists agents a crashed or closed session left mid-run, for reviving; `/coord stats` sums waits, refusals, peaks and job outcomes per day; `omp-coord doctor` checks the scope's health.
 
 ## How slots are counted
 
@@ -26,8 +32,9 @@ omp gives the spawn check 30 seconds and then lets the spawn through, so the ext
 ## Build and test queues
 
 ```sh
-omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] -- <command> [args…]
-omp-coord status
+omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
+omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <text…>
+omp-coord pause [reason…] | resume | doctor [--fix]
 ```
 
 - `run` waits for a slot of `<queue>`, runs the command with the terminal's input and output, and exits with the command's exit code. Ctrl-C while waiting leaves the line; while running, it is passed to the command.
@@ -63,7 +70,7 @@ extensions:
 
 or for one run: `omp -e /path/to/omp-coord/src/index.ts`.
 
-Put the runner on `PATH` with `bun link` in this folder (it installs `omp-coord` into `~/.bun/bin`), or call `bun /path/to/omp-coord/src/cli.ts`.
+Put the runner on `PATH` with `bun link` in this folder (it installs `omp-coord` into `~/.bun/bin`), or call `bun /path/to/omp-coord/src/adapters/cli/cli.ts`.
 
 The extension stays inactive in a session unless it finds a `.omp-coord.json` in the session's folder or a parent folder (so every worktree below a checkout uses the checkout's file), or the file named by `OMP_COORD_CONFIG`.
 
@@ -74,7 +81,7 @@ The extension stays inactive in a session unless it finds a `.omp-coord.json` in
 | Field | Default | Meaning |
 |---|---|---|
 | `scope` | required | Sessions coordinate only with sessions of the same scope. Letters, digits, `.`, `_`, `-`. |
-| `agents.pools` | `{ "work": { "cap": 8 } }` | Pools of slots: `cap`, and `agentTypes` (omp agent definition names) that use the pool. |
+| `agents.pools` | `{ "work": { "cap": 8 } }` | Pools of slots: `cap`, `agentTypes` (omp agent definition names) that use the pool, and `loadCaps`: `[{ "above": 150, "cap": 4 }]` lowers the cap while the 1-minute load average is above 150. |
 | `agents.defaultPool` | first pool | Pool for agent types no pool lists. |
 | `agents.exempt` | `[]` | Agent types that never take a slot (read-only reviewers). |
 | `agents.nested.allow` | `agents.exempt` | Agent types a subagent may start. |
@@ -88,19 +95,33 @@ The extension stays inactive in a session unless it finds a `.omp-coord.json` in
 | `queues.<name>.lanes` | `["normal"]` | Lane names, first served first; the last is the default. |
 | `queues.<name>.agingMinutes` | none | Waiting this long adds 1 to a job's priority. |
 | `queues.<name>.onDuplicate` | `"refuse"` | `"refuse"` or `"supersede"` a waiting job with the same key. |
-| `history.retentionDays` | `30` | Events older than this are deleted from the event log. |
+| `queues.<name>.timeoutMinutes` | none | Stop a job's command after this long (SIGTERM, then SIGKILL 10 s later); it exits 124. `--timeout` overrides it per job. |
+| `queues.<name>.loadSlots` | `[]` | `[{ "above": 150, "slots": 1 }]`: fewer slots under load; `0` holds the queue. |
+| `resources.ports` | none | `{ "from", "to", "perSession", "perAgent" (10) }`: each session gets a block of `perSession` ports, each agent a block of `perAgent` from its session's. |
+| `resources.scratch` | none | Root of the scratch folders: `<scratch>/<letter>` per session, `<scratch>/<letter>/<agent id>` per agent. Relative to the config file. |
+| `history.retentionDays` | `30` | Events and decision-log notes older than this are deleted. |
 | `history.maxEvents` | `100000` | The event log keeps at most this many of the newest events. |
 
 Agent type names are matched lowercased against omp's agent definition names (`task`, `scout`, `reviewer`, `security-reviewer`, `sonic`, or your own).
 
 ## Use
 
-- `/coord`: sessions, slots per session, the line, and each queue's running and waiting jobs.
-- `/coord send <letter|all> <text>`: message other sessions yourself.
-- Agents get the tools `coord_status`, `coord_send` (main session only) and `coord_job_priority`.
-- `omp-coord status` prints the queues from any terminal.
+| In omp | Does |
+|---|---|
+| `/coord` | Sessions, slots, the line, claims, queues, the latest decisions; marks a paused scope and sessions reading a different config file. |
+| `/coord send <letter\|B/agent\|all> <text>` | Message other sessions or one of their subagents. |
+| `/coord pause [reason]`, `/coord resume` | Stop and restart new agents and queued jobs in every session. |
+| `/coord claim <branch\|worktree\|pr> <target> [note]`, `/coord release <kind> <target>` | Claim or release. |
+| `/coord note <text>`, `/coord notes [n]` | Write to and read the decision log. |
+| `/coord stats [days]`, `/coord interrupted [hours]` | Reports from the event log. |
 
-Messages arrive as `[omp-coord] Message from omp session A …`, marked as coming from another session rather than from the user.
+Agents get the tools `coord_status`, `coord_send` (main session only), `coord_claim`, `coord_release`, `coord_note`, `coord_resources` and `coord_job_priority`. Commands an agent runs see `OMP_COORD_SESSION`, and, when configured, `OMP_COORD_PORTS` (the session's block, e.g. `18700-18799`) and `OMP_COORD_SCRATCH`.
+
+Messages arrive as `[omp-coord] Message from omp session A …`, marked as coming from another session rather than from the user. A message for a subagent that is not running goes to its main session, which can pass it on with `write agent://<id>`.
+
+**Claims are a guard against mistakes, not a lock.** They match command text: a git command that changes a claimed worktree (run in it, after `cd` into it, or with `git -C`), a git command that changes a branch named in it (push, checkout, rebase, reset, …), or a `gh pr` command that changes a claimed PR (edit, comment, merge, …). Reading commands always pass, and so does anything written to dodge the patterns.
+
+**After a crash**, `/coord interrupted` (or `omp-coord interrupted`) lists, per session that left, the agents that were mid-run and the folder the session ran in. omp keeps their transcripts; revive each from a session in that folder with `write agent://<id>`.
 
 ## State and event log
 
@@ -110,16 +131,22 @@ The database is meant to be read by other tools. Current state:
 
 | Table | Rows |
 |---|---|
-| `sessions` | Live sessions: `id`, `label` (A, B…), `pid`, `cwd`, `socket`, `started_at`. |
+| `sessions` | Live sessions: `id`, `label` (A, B…), `pid`, `cwd`, `socket`, `started_at`, `config_hash` (of the `.omp-coord.json` it read), `ports_from`/`ports_to`. |
 | `slots` | Agent slots held: `session_id`, `agent_id`, `parent_id`, `agent_type`, `pool` (null outside the caps), `state` (`starting` or `running`), `since`. |
 | `tickets` | The line: `session_id`, `pool`, `since`, `hold_until` (set while a slot is held for it), `notified`. |
 | `messages` | Messages not yet delivered. |
 | `jobs` | Queued and running build/test jobs: `id`, `queue`, `owner` (session id, or null outside omp), `lane`, `priority`, `key`, `command`, `pid`, `state` (`waiting`, `running`, `superseded`), `since`, `started_at`. |
+| `claims` | `kind` (`branch`, `worktree`, `pr`), `target`, `session_id`, `agent_id`, `note`, `since`. |
+| `pause` | One row while the scope is paused: `by_session` (null from a terminal), `reason`, `since`. |
+| `agent_ports` | Port blocks agents took: `session_id`, `agent_id`, `from_port`, `to_port`. |
+| `machine_load` | The latest load average any session or runner measured, and when. |
+| `notes` | The decision log: `id`, `at`, `label`, `author`, `text`. Kept like events (`history.retentionDays`). |
 
 `events` is an append-only log: `at` (ms since epoch), `type`, `session_id` (null for jobs from outside omp), `label`, and `data` (JSON). Types:
 
 - Sessions and agents: `session_joined`, `session_left`, `spawn_approved`, `spawn_refused` (with `position`, `used`, `cap`, or `nested` and `reason`), `run_started` (with `revived`), `run_ended` (with `ranMs`), `start_expired`, `hold_granted`, `hold_used` and `hold_expired` (with `waitedMs` since the first refusal), `message_sent` (recipients and length, never the text).
-- Jobs: `job_queued` (with `queue`, `lane`, `priority`, `key`), `job_refused` (with `reason`), `job_started` (with `waitedMs`), `job_ended` (with `exitCode`, `ranMs`), `job_withdrawn` (left the line before starting), `job_superseded`, `job_lost` (its runner died), `job_reprioritized`.
+- Jobs: `job_queued` (with `queue`, `lane`, `priority`, `key`), `job_refused` (with `reason`), `job_started` (with `waitedMs`), `job_ended` (with `exitCode`, `ranMs`, and `timedOut` when the time limit stopped it), `job_withdrawn` (left the line before starting), `job_superseded`, `job_lost` (its runner died), `job_reprioritized`.
+- Control: `paused` (with `reason`), `resumed` (with `pausedMs`), `claimed`, `released`, `claim_refused` (with `holder`), `note_added` (note number and length).
 
 Retention: events older than `history.retentionDays` and all but the newest `history.maxEvents` are deleted when a session starts and then at most once an hour. All times are milliseconds since the epoch.
 

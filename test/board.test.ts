@@ -7,7 +7,7 @@ import { registerSession, removeSession } from "../src/domain/sessions.ts";
 const MIN = 60_000;
 
 const policy: AgentPolicy = {
-  pools: { work: { cap: 2, agentTypes: [] }, short: { cap: 1, agentTypes: ["scout"] } },
+  pools: { work: { cap: 2, agentTypes: [], loadCaps: [] }, short: { cap: 1, agentTypes: ["scout"], loadCaps: [] } },
   defaultPool: "work",
   exempt: ["reviewer"],
   nested: { allow: ["reviewer"], maxRunningPerParent: 1 },
@@ -18,7 +18,7 @@ const policy: AgentPolicy = {
 
 function boardWith(...ids: string[]): Board {
   const board = emptyBoard();
-  for (const id of ids) registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, now: 0 });
+  for (const id of ids) registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 });
   return board;
 }
 
@@ -207,7 +207,7 @@ describe("agents started by subagents", () => {
 describe("sessions", () => {
   test("each session gets the first free letter, and a letter is reused once its session is gone", () => {
     const board = emptyBoard();
-    const reg = (id: string) => registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, now: 0 });
+    const reg = (id: string) => registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 });
     expect([reg("x"), reg("y"), reg("z")]).toEqual(["A", "B", "C"]);
     removeSession(board, policy, "y", 1);
     expect(reg("w")).toBe("B");
@@ -231,7 +231,7 @@ describe("messages", () => {
     const board = boardWith("a", "b", "c");
     expect(sendMessage(board, policy, { from: "a", to: "B", text: "CLAIM x", now: 0 })).toEqual({ ok: true, delivered: ["B"] });
     expect(takeInbox(board, "c")).toEqual([]);
-    expect(takeInbox(board, "b")).toEqual([{ from: "A", text: "CLAIM x", sentAt: 0 }]);
+    expect(takeInbox(board, "b")).toEqual([{ from: "A", toAgent: undefined, text: "CLAIM x", sentAt: 0 }]);
     expect(takeInbox(board, "b")).toEqual([]);
   });
 
@@ -306,8 +306,8 @@ describe("event log", () => {
 
   test("sessions joining and leaving, and messages, are recorded without the message text", () => {
     const board = emptyBoard();
-    registerSession(board, { id: "a", pid: 1, cwd: "/w", socket: "/s/a", now: 0 });
-    registerSession(board, { id: "b", pid: 2, cwd: "/w", socket: "/s/b", now: 0 });
+    registerSession(board, { id: "a", pid: 1, cwd: "/w", socket: "/s/a", configHash: "h", now: 0 });
+    registerSession(board, { id: "b", pid: 2, cwd: "/w", socket: "/s/b", configHash: "h", now: 0 });
     sendMessage(board, policy, { from: "a", to: "all", text: "secret plan", now: 1 });
     removeSession(board, policy, "b", 2);
 

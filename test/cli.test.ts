@@ -99,3 +99,36 @@ describe("omp-coord run", () => {
     const { run } = scope({ heavy: { slots: 1 } });
     expect(await run("run", "heavy", "--", "sh", "-c", "kill -SEGV $$").exited).toBe(128 + 11);
   });
+
+  test("a command past its time limit is stopped, exits 124, and is counted as timed out", async () => {
+    const { run } = scope({ heavy: { slots: 1 } });
+    const started = Date.now();
+    expect(await run("run", "heavy", "--timeout", "1s", "--", "sleep", "30").exited).toBe(124);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(await new Response(run("stats").stdout).text()).toMatch(/heavy: 1 started.*1 failed \(1 timed out\)/);
+  }, 20_000);
+
+  test("while paused nothing starts; resuming lets the waiting job run", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    expect(await run("pause", "merging", "tools").exited).toBe(0);
+    const waiting = run("run", "heavy", "--", "sh", "-c", `touch ${root}/ran`);
+    await Bun.sleep(1500); // let the runner join the line and stay waiting; nothing observable happens before
+    expect(existsSync(join(root, "ran"))).toBe(false);
+    expect(await new Response(run("status").stdout).text()).toMatch(/PAUSED: paused from a terminal: merging tools/);
+    expect(await run("resume").exited).toBe(0);
+    expect(await waiting.exited).toBe(0);
+    expect(existsSync(join(root, "ran"))).toBe(true);
+  }, 20_000);
+
+  test("doctor reports a socket file nothing listens on, and --fix removes it", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    expect(await run("status").exited).toBe(0);
+    mkdirSync(join(root, "state", "s"), { recursive: true });
+    // A runner killed with SIGKILL leaves its socket file behind with nothing listening.
+    const dead = join(root, "state", "s", "job-dead.sock");
+    await Bun.spawn(["bun", "-e", `Bun.listen({ unix: ${JSON.stringify(dead)}, socket: { data() {} } }); process.kill(process.pid, "SIGKILL");`]).exited;
+    expect(existsSync(dead)).toBe(true);
+    expect(await new Response(run("doctor").stdout).text()).toMatch(/WARN\s+1 socket file\(s\) nothing listens on/);
+    expect(await new Response(run("doctor", "--fix").stdout).text()).toMatch(/removed 1 socket file/);
+    expect(existsSync(join(root, "state", "s", "job-dead.sock"))).toBe(false);
+  }, 20_000);

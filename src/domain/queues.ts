@@ -11,6 +11,7 @@
  * behind others in its lane. Lanes are strict: an earlier lane always goes first.
  * Pure transitions over the shared `Board` (`model.ts`).
  */
+import { currentLoad, type LoadLimit, limitUnderLoad } from "./limits.ts";
 import { type Board, type Job, emit } from "./model.ts";
 
 /** Priorities run from -MAX_PRIORITY to MAX_PRIORITY. */
@@ -24,6 +25,16 @@ export interface QueuePolicy {
   agingMs: number | null;
   /** A job whose key matches a waiting job: refuse it, or let it replace the waiting one in its place. */
   onDuplicate: "refuse" | "supersede";
+  /** Longest a job's command may run before it is stopped, or null for no limit. */
+  timeoutMs: number | null;
+  /** Fewer slots while the machine is under load. */
+  loadSlots: LoadLimit[];
+}
+
+/** A queue's slots now: lowered under load, 0 while paused. */
+export function slotsOf(board: Board, policy: QueuePolicy, now: number): number {
+  if (board.pause) return 0;
+  return limitUnderLoad(policy.slots, policy.loadSlots, currentLoad(board, now));
 }
 
 export type Queues = Record<string, QueuePolicy>;
@@ -93,13 +104,22 @@ function refuse(board: Board, req: JobRequest, reason: string): EnqueueResult {
   return { ok: false, reason };
 }
 
-/** A job's runner is done with it: its command finished (with its exit code), or it left the line before starting. */
-export function jobEnded(board: Board, queues: Queues, j: { id: string; exitCode: number | null; now: number }): void {
+/**
+ * A job's runner is done with it: its command finished (with its exit code, `timedOut` when the queue's time limit
+ * stopped it), or it left the line before starting.
+ */
+export function jobEnded(board: Board, queues: Queues, j: { id: string; exitCode: number | null; timedOut?: boolean; now: number }): void {
   const job = board.jobs.find(x => x.id === j.id);
   if (!job) return;
   board.jobs = board.jobs.filter(x => x !== job);
   if (job.state === "running") {
-    emit(board, j.now, "job_ended", job.owner, { job: job.id, queue: job.queue, exitCode: j.exitCode, ranMs: j.now - (job.startedAt ?? j.now) });
+    emit(board, j.now, "job_ended", job.owner, {
+      job: job.id,
+      queue: job.queue,
+      exitCode: j.exitCode,
+      ranMs: j.now - (job.startedAt ?? j.now),
+      ...(j.timedOut ? { timedOut: true } : {}),
+    });
   } else if (job.state === "waiting") {
     emit(board, j.now, "job_withdrawn", job.owner, { job: job.id, queue: job.queue, waitedMs: j.now - job.since });
   }
@@ -131,7 +151,7 @@ export function setJobPriority(board: Board, r: { id: string; sessionId: string;
 /** Starts waiting jobs while their queue has free slots, in the queue's order. */
 export function schedule(board: Board, queues: Queues, now: number): void {
   for (const [name, policy] of Object.entries(queues)) {
-    let free = policy.slots - board.jobs.filter(j => j.queue === name && j.state === "running").length;
+    let free = slotsOf(board, policy, now) - board.jobs.filter(j => j.queue === name && j.state === "running").length;
     if (free <= 0) continue;
     for (const job of orderWaiting(policy, name, board, now)) {
       if (free-- <= 0) break;

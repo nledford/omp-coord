@@ -1,54 +1,146 @@
 #!/usr/bin/env bun
 /**
  * omp-coord command line: runs commands through the shared build and test queues, from `just` recipes, scripts,
- * terminals, or agents' bash calls (which the extension rewrites to go through here).
+ * terminals, or agents' bash calls (which the extension rewrites to go through here), and reports on the scope.
  *
- *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] -- <command> [args…]
- *   omp-coord status
+ *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
+ *   omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <text…>
+ *   omp-coord pause [reason…] | resume | doctor [--fix]
  *
  * `run` waits for a slot, runs the command with the terminal's stdin/stdout/stderr, and exits with its exit code.
  * The command gets `OMP_COORD_JOB` (the job id) and `OMP_COORD_QUEUE` in its environment; a nested `run` on the same
  * queue runs at once, since the command already holds that queue's slot.
- * Exit 75 means the job was not run: refused (a duplicate of a waiting or running job) or superseded by a newer one.
- * Exit 2 means a usage or configuration error.
+ * Exit 75 means the job was not run (a refused or superseded duplicate); 124 that its time limit stopped it;
+ * 2 a usage or configuration error.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { constants } from "node:os";
+import { mkdirSync, readdirSync, statSync } from "node:fs";
+import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { Coordinator } from "../../app/coordinator.ts";
+import { doctor } from "../../app/doctor.ts";
 import { runJob } from "../../app/job-runner.ts";
+import { osLoad } from "../os/load.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { MAX_PRIORITY } from "../../domain/queues.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
-import { formatQueues } from "../text/report.ts";
+import { formatFindings, formatInterrupted, formatNotes, formatStats, formatStatus } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 
 const EXIT_USAGE = 2;
+/** How long a command gets to stop after SIGTERM before SIGKILL, once its time limit passed. */
+const KILL_GRACE_MS = 10_000;
+const DAY = 86_400_000;
+
+const USAGE = `usage:
+  omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command…>
+  omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <text…>
+  omp-coord pause [reason…] | resume | doctor [--fix]`;
 
 class UsageError extends Error {}
 
 async function main(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
-  if (sub === "run") return run(rest);
-  if (sub === "status") return status();
-  throw new UsageError("usage: omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] -- <command…> | omp-coord status");
+  switch (sub) {
+    case "run":
+      return run(rest);
+    case "status":
+      return withScope(({ config, coordinator }) => print(formatStatus(coordinator.board(), config, "", Date.now())));
+    case "stats":
+      return withScope(({ coordinator }) => print(formatStats(coordinator.stats(wholeNumber(rest[0], 7, "days") * DAY))));
+    case "interrupted":
+      return withScope(({ coordinator }) => print(formatInterrupted(coordinator.interrupted(wholeNumber(rest[0], 24, "hours") * 3_600_000))));
+    case "notes":
+      return withScope(({ coordinator }) => print(formatNotes(coordinator.notes(wholeNumber(rest[0], 20, "count")))));
+    case "note":
+      return withScope(({ coordinator }) => {
+        const r = coordinator.note(null, userInfo().username, rest.join(" "));
+        if (!r.ok) throw new UsageError(`omp-coord note: ${r.reason}`);
+        return print(`noted #${r.note.id}`);
+      });
+    case "pause":
+      return withScope(({ coordinator }) => {
+        coordinator.pause(null, rest.join(" "));
+        return print("paused: no new agent or queued job starts in this scope until `omp-coord resume`");
+      });
+    case "resume":
+      return withScope(({ coordinator }) => print(coordinator.resume(null) ? "resumed" : "was not paused"));
+    case "doctor":
+      return withScope(async ({ config, coordinator, dir }) => {
+        const findings = await doctor(
+          coordinator,
+          unixLiveness,
+          {
+            config,
+            stateDirMode: statSync(dir).mode,
+            socketFiles: socketFiles(join(dir, "s")),
+            cliOnPath: Bun.which("omp-coord") !== null,
+            bunOnPath: Bun.which("bun") !== null,
+            now: Date.now(),
+          },
+          rest.includes("--fix"),
+        );
+        console.log(formatFindings(findings));
+        return findings.some(f => f.level === "error") ? 1 : 0;
+      });
+    default:
+      throw new UsageError(USAGE);
+  }
 }
 
-function openScope(): { config: Config; store: BoardStore; dir: string } {
+interface Scope {
+  config: Config;
+  store: BoardStore;
+  coordinator: Coordinator;
+  dir: string;
+}
+
+function openScope(): Scope {
   const path = findConfigFile(process.cwd());
   if (!path) throw new UsageError(`no .omp-coord.json in ${process.cwd()} or above it (or set OMP_COORD_CONFIG)`);
   const config = loadConfig(path);
   const dir = stateDir();
-  return { config, dir, store: new BoardStore(join(dir, `${config.scope}.db`), config.history) };
+  const store = new BoardStore(join(dir, `${config.scope}.db`), config.history);
+  return { config, dir, store, coordinator: new Coordinator(config, store, unixLiveness, Date, osLoad) };
 }
 
-async function status(): Promise<number> {
-  const { config, store } = openScope();
-  const lines = formatQueues(store.read(), config.queues, Date.now());
-  console.log(lines.length ? lines.join("\n").replace(/^ {2}/gm, "") : `no queues in ${config.source}`);
-  store.close();
+async function withScope(f: (s: Scope) => number | Promise<number>): Promise<number> {
+  const scope = openScope();
+  try {
+    return await f(scope);
+  } finally {
+    scope.store.close();
+  }
+}
+
+function print(text: string): number {
+  console.log(text);
   return 0;
+}
+
+function wholeNumber(v: string | undefined, fallback: number, what: string): number {
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 1) throw new UsageError(`${what} must be a whole number of at least 1`);
+  return n;
+}
+
+function socketFiles(dir: string): string[] {
+  try {
+    return readdirSync(dir)
+      .filter(f => f.endsWith(".sock"))
+      .map(f => join(dir, f));
+  } catch {
+    return [];
+  }
+}
+
+/** `90m`, `2h`, `45s`, or a plain number of minutes. */
+export function parseDuration(text: string): number {
+  const m = /^(\d+)\s*(s|m|h)?$/.exec(text.trim());
+  if (!m || Number(m[1]) < 1) throw new UsageError(`--timeout takes a duration such as 90m, 2h or 45s, not "${text}"`);
+  return Number(m[1]) * { s: 1000, m: 60_000, h: 3_600_000 }[(m[2] ?? "m") as "s" | "m" | "h"];
 }
 
 async function run(args: string[]): Promise<number> {
@@ -67,14 +159,16 @@ async function run(args: string[]): Promise<number> {
   if (!Number.isSafeInteger(priority) || Math.abs(priority) > MAX_PRIORITY) {
     throw new UsageError(`omp-coord run: --priority must be a whole number from -${MAX_PRIORITY} to ${MAX_PRIORITY}`);
   }
+  const timeoutMs = values.timeout === undefined ? undefined : parseDuration(values.timeout);
   const command = args.slice(split + 1);
 
   // A command that already holds a slot of this queue runs nested jobs of the same queue at once: waiting for a
   // second slot of a one-slot queue would wait for itself forever.
-  if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) return spawnCommand(command, process.env, () => undefined);
+  if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) {
+    return (await spawnCommand(command, process.env, timeoutMs ?? null, () => undefined)).code;
+  }
 
-  const { config, store, dir } = openScope();
-  try {
+  return withScope(async ({ config, store, dir }) => {
     const policy = Object.hasOwn(config.queues, queue) ? config.queues[queue] : undefined;
     if (!policy) throw new UsageError(`omp-coord run: no queue "${queue}" in ${config.source} (${Object.keys(config.queues).join(", ") || "none"})`);
     if (values.lane !== undefined && !policy.lanes.includes(values.lane)) {
@@ -93,7 +187,7 @@ async function run(args: string[]): Promise<number> {
       });
     }
 
-    return await runJob(
+    return runJob(
       {
         id,
         queue,
@@ -103,26 +197,26 @@ async function run(args: string[]): Promise<number> {
         ...(values.key === undefined ? {} : { key: values.key }),
         command: command.join(" "),
         pid: process.pid,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       },
       config.queues,
       {
         repo: store,
         liveness: unixLiveness,
         clock: Date,
+        load: osLoad,
         listen: () => startBeacon(address),
         sleep: ms => Bun.sleep(ms),
         stopRequested: () => (stopping ? 128 + signalNumber(stopping) : undefined),
         report: line => console.error(line),
-        execute: () =>
-          spawnCommand(command, { ...process.env, OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }, f => {
+        execute: limit =>
+          spawnCommand(command, { ...process.env, OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }, limit, f => {
             forward = f;
             if (stopping) f(stopping);
           }),
       },
     );
-  } finally {
-    store.close();
-  }
+  });
 }
 
 function parseRunFlags(args: string[]) {
@@ -130,23 +224,47 @@ function parseRunFlags(args: string[]) {
     args,
     allowPositionals: true,
     strict: true,
-    options: { lane: { type: "string" }, priority: { type: "string" }, key: { type: "string" }, owner: { type: "string" } },
+    options: {
+      lane: { type: "string" },
+      priority: { type: "string" },
+      key: { type: "string" },
+      owner: { type: "string" },
+      timeout: { type: "string" },
+    },
   });
 }
 
 /**
  * Runs the command with the terminal's input and output and returns its exit status (128 + signal number when a
- * signal ended it). `onStart` receives a function that passes a signal on to it. Ctrl-C at a terminal already
- * reaches the command (the terminal signals the whole process group), so SIGINT is passed on only without one.
+ * signal ended it). With a time limit, sends SIGTERM when it passes and SIGKILL 10 s later. `onStart` receives a
+ * function that passes a signal on to it. Ctrl-C at a terminal already reaches the command (the terminal signals the
+ * whole process group), so SIGINT is passed on only without one.
  */
-async function spawnCommand(command: string[], env: NodeJS.ProcessEnv, onStart: (forward: (signal: NodeJS.Signals) => void) => void): Promise<number> {
+async function spawnCommand(
+  command: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number | null,
+  onStart: (forward: (signal: NodeJS.Signals) => void) => void,
+): Promise<{ code: number; timedOut: boolean }> {
   const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env });
   onStart(signal => {
     if (signal === "SIGINT" && process.stdin.isTTY) return;
     child.kill(signal);
   });
+  let timedOut = false;
+  let killer: ReturnType<typeof setTimeout> | undefined;
+  const limit =
+    timeoutMs === null
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+          killer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+        }, timeoutMs);
   const exitCode = await child.exited;
-  return child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode;
+  clearTimeout(limit);
+  clearTimeout(killer);
+  return { code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode, timedOut };
 }
 
 function signalNumber(signal: NodeJS.Signals): number {
