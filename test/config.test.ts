@@ -35,7 +35,7 @@ describe("config", () => {
     expect(() => parseConfig({ scope: "p", agents: { pools: { work: { cap: 0 } } } }, "f")).toThrow(
       new ConfigError("f: agents.pools.work.cap must be a whole number of at least 1"),
     );
-    expect(() => parseConfig({ scope: "p", refuseCommands: [{ pattern: "(", reason: "r" }] }, "f")).toThrow(/refuseCommands\[0\]\.pattern/);
+    expect(() => parseConfig({ scope: "p", commands: [{ pattern: "(", action: "refuse", reason: "r" }] }, "f")).toThrow(/commands\[0\]\.pattern/);
   });
 
   test("an agent type may belong to only one pool, and not also be exempt", () => {
@@ -50,9 +50,20 @@ describe("config", () => {
     expect(() => parseConfig({ scope: "p", agents: { defaultPool: "nope" } }, "f")).toThrow(/agents\.defaultPool/);
   });
 
-  test("queue folders are relative to the config file", () => {
-    const c = parseConfig({ scope: "p", queues: [{ name: "heavy", dir: "slots", slots: 2 }] }, "/cfg/.omp-coord.json");
-    expect(c.queues[0]?.dir).toBe("/cfg/slots");
+  test("queues default to FIFO in one lane, refusing duplicates", () => {
+    const c = parseConfig({ scope: "p", queues: { heavy: { slots: 2 } } }, "f");
+    expect(c.queues.heavy).toEqual({ slots: 2, order: "fifo", lanes: ["normal"], agingMs: null, onDuplicate: "refuse" });
+    expect(() => parseConfig({ scope: "p", queues: { heavy: { slots: 2, order: "lifo" } } }, "f")).toThrow(/queues\.heavy\.order/);
+  });
+
+  test("a command rule must name a queue and lane that exist", () => {
+    const queues = { test: { slots: 3, lanes: ["front", "normal"] } };
+    expect(() => parseConfig({ scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "heavy" }] }, "f")).toThrow(
+      /commands\[0\]\.queue/,
+    );
+    expect(() => parseConfig({ scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "test", lane: "vip" }] }, "f")).toThrow(
+      /commands\[0\]\.lane/,
+    );
   });
 
   test("a worktree below the checkout finds the checkout's file; the environment variable wins", () => {

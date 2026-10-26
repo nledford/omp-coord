@@ -20,8 +20,9 @@ export interface Retention {
 
 export const DEFAULT_RETENTION: Retention = { maxAgeMs: 30 * 24 * 3_600_000, maxEvents: 100_000 };
 
-const SCHEMA_VERSION = 1;
 const PRUNE_INTERVAL_MS = 3_600_000;
+
+const SCHEMA_VERSION = 1;
 
 const SCHEMA = `
 CREATE TABLE sessions (
@@ -61,11 +62,30 @@ CREATE TABLE sent (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   at         INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE jobs (
+  id         TEXT PRIMARY KEY,
+  queue      TEXT NOT NULL,
+  owner      TEXT,
+  lane       TEXT NOT NULL,
+  priority   INTEGER NOT NULL,
+  key        TEXT,
+  command    TEXT NOT NULL,
+  socket     TEXT NOT NULL,
+  pid        INTEGER NOT NULL,
+  state      TEXT NOT NULL CHECK (state IN ('waiting', 'running', 'superseded')),
+  since      INTEGER NOT NULL,
+  started_at INTEGER
+) STRICT;
+CREATE TABLE queue_served (
+  queue TEXT NOT NULL,
+  owner TEXT,
+  at    INTEGER NOT NULL
+) STRICT;
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY,
   at         INTEGER NOT NULL,
   type       TEXT NOT NULL,
-  session_id TEXT NOT NULL,
+  session_id TEXT,
   label      TEXT,
   data       TEXT NOT NULL
 ) STRICT;
@@ -93,7 +113,18 @@ export class BoardStore {
     this.#db = new Database(path, { create: true, strict: true });
     chmodSync(path, 0o600);
     this.#db.exec("PRAGMA busy_timeout = 5000");
-    this.#db.exec("PRAGMA journal_mode = WAL");
+    // Switching a new database to WAL needs a lock that busy_timeout does not wait for, so sessions opening a new
+    // scope at the same moment retry briefly. WAL is then recorded in the file and later opens find it set.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        this.#db.exec("PRAGMA journal_mode = WAL");
+        break;
+      } catch (error) {
+        const busy = typeof error === "object" && error !== null && "code" in error && error.code === "SQLITE_BUSY";
+        if (!busy || attempt >= 100) throw error;
+        Bun.sleepSync(20 + Math.floor(Math.random() * 30));
+      }
+    }
     this.#db.exec("PRAGMA foreign_keys = ON");
     this.#db.transaction(() => this.#migrate()).immediate();
     this.pruneEvents(Date.now());
@@ -122,7 +153,7 @@ export class BoardStore {
   /** Events oldest first, optionally only those at or after `since`. */
   events(since = 0): BoardEvent[] {
     return this.#db
-      .query<{ at: number; type: BoardEvent["type"]; session_id: string; label: string | null; data: string }, [number]>(
+      .query<{ at: number; type: BoardEvent["type"]; session_id: string | null; label: string | null; data: string }, [number]>(
         "SELECT at, type, session_id, label, data FROM events WHERE at >= ? ORDER BY id",
       )
       .all(since)
@@ -145,12 +176,9 @@ export class BoardStore {
   #migrate(): void {
     const version = this.#db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
     if (version === SCHEMA_VERSION) return;
-    if (version > SCHEMA_VERSION) {
-      throw new Error(`the board database has schema ${version}, newer than this omp-coord (${SCHEMA_VERSION}); update omp-coord`);
+    if (version !== 0) {
+      throw new Error(`the board database has schema ${version}, but this omp-coord reads schema ${SCHEMA_VERSION}; update omp-coord`);
     }
-    // Before version 1 the board was one JSON row. Board state is short-lived (live sessions only), so it is dropped
-    // rather than converted; sessions re-register within a tick.
-    this.#db.exec("DROP TABLE IF EXISTS board");
     this.#db.exec(SCHEMA);
     this.#db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
@@ -195,13 +223,47 @@ export class BoardStore {
         .query<{ session_id: string; at: number }, []>("SELECT * FROM sent")
         .all()
         .map(r => ({ sessionId: r.session_id, at: r.at })),
+      jobs: db
+        .query<
+          {
+            id: string;
+            queue: string;
+            owner: string | null;
+            lane: string;
+            priority: number;
+            key: string | null;
+            command: string;
+            socket: string;
+            pid: number;
+            state: "waiting" | "running" | "superseded";
+            since: number;
+            started_at: number | null;
+          },
+          []
+        >("SELECT * FROM jobs")
+        .all()
+        .map(r => ({
+          id: r.id,
+          queue: r.queue,
+          owner: r.owner,
+          lane: r.lane,
+          priority: r.priority,
+          key: r.key ?? undefined,
+          command: r.command,
+          socket: r.socket,
+          pid: r.pid,
+          state: r.state,
+          since: r.since,
+          startedAt: r.started_at ?? undefined,
+        })),
+      served: db.query<{ queue: string; owner: string | null; at: number }, []>("SELECT * FROM queue_served").all(),
     };
   }
 
   /** Replaces the state tables with the board (a few dozen rows at most) and appends its events. */
   #save(board: Board): void {
     const db = this.#db;
-    for (const table of ["sent", "messages", "tickets", "slots", "sessions"]) db.exec(`DELETE FROM ${table}`);
+    for (const table of ["sent", "messages", "tickets", "slots", "sessions", "jobs", "queue_served"]) db.exec(`DELETE FROM ${table}`);
 
     const session = db.query("INSERT INTO sessions (id, label, pid, cwd, socket, started_at) VALUES (?, ?, ?, ?, ?, ?)");
     for (const s of board.sessions) session.run(s.id, s.label, s.pid, s.cwd, s.socket, s.startedAt);
@@ -213,6 +275,14 @@ export class BoardStore {
     for (const m of board.messages) message.run(m.fromId, m.toId, m.text, m.sentAt);
     const sent = db.query("INSERT INTO sent (session_id, at) VALUES (?, ?)");
     for (const x of board.sent) sent.run(x.sessionId, x.at);
+    const job = db.query(
+      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const j of board.jobs) {
+      job.run(j.id, j.queue, j.owner, j.lane, j.priority, j.key ?? null, j.command, j.socket, j.pid, j.state, j.since, j.startedAt ?? null);
+    }
+    const served = db.query("INSERT INTO queue_served (queue, owner, at) VALUES (?, ?, ?)");
+    for (const s of board.served) served.run(s.queue, s.owner, s.at);
 
     const event = db.query("INSERT INTO events (at, type, session_id, label, data) VALUES (?, ?, ?, ?, ?)");
     for (const e of board.events) event.run(e.at, e.type, e.sessionId, e.label, JSON.stringify(e.data));

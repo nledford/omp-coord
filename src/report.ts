@@ -1,12 +1,12 @@
-/** Plain-text status of the board and the build queues, for `/coord` and the `coord_status` tool. */
+/** Plain-text status of the board, for `/coord`, the `coord_status` tool, `omp-coord status` and the footer. */
 import { type AgentPolicy, type Board, labelOf, used } from "./domain/board.ts";
-import type { QueueView } from "./infra/flock-queues.ts";
+import { type Queues, orderWaiting } from "./domain/queues.ts";
 
 export function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatStatus(board: Board, policy: AgentPolicy, scope: string, me: string, queues: QueueView[]): string {
+export function formatStatus(board: Board, policy: AgentPolicy, queues: Queues, scope: string, me: string, now: number): string {
   const lines: string[] = [];
   lines.push(`This session: ${labelOf(board, me) ?? "(not registered)"} (scope ${scope})`);
 
@@ -40,27 +40,40 @@ export function formatStatus(board: Board, policy: AgentPolicy, scope: string, m
     lines.push(`Line for ${pool}: ${entries.join(", ")}`);
   }
 
-  if (queues.length) {
-    lines.push("Build and test queues:");
-    for (const q of queues) {
-      const running = q.running.map(r => r.holder || `slot ${r.slot}`).join("; ");
-      const waiting = q.waiting.filter(w => w.alive);
-      lines.push(
-        `  ${q.name}: ${q.running.length}/${q.slots} running${running ? ` (${running})` : ""}, ${waiting.length} waiting` +
-          (waiting.length ? `: ${waiting.map(w => `${w.holder || w.ticket} ${Math.round(w.ageSeconds / 60)} min`).join("; ")}` : "") +
-          (q.problem ? ` [${q.problem}]` : ""),
-      );
-    }
-  }
+  const queueLines = formatQueues(board, queues, now);
+  if (queueLines.length) lines.push("Build and test queues:", ...queueLines);
   return lines.join("\n");
 }
 
-/** One-line footer summary: `coord B · work 5/8 · short 1/2 · 1 held · 2 in line`. */
-export function formatFooter(board: Board, policy: AgentPolicy, me: string): string {
+/** One block per queue: running jobs, then waiting jobs in the order they will start. */
+export function formatQueues(board: Board, queues: Queues, now: number): string[] {
+  const lines: string[] = [];
+  const who = (owner: string | null) => (owner === null ? "outside omp" : `session ${labelOf(board, owner) ?? "(ended)"}`);
+  const minutes = (ms: number) => `${Math.round(ms / 60_000)} min`;
+  for (const [name, q] of Object.entries(queues)) {
+    const running = board.jobs.filter(j => j.queue === name && j.state === "running");
+    const waiting = orderWaiting(q, name, board, now);
+    lines.push(`  ${name} (${q.order}): ${running.length}/${q.slots} running, ${waiting.length} waiting`);
+    for (const j of running) lines.push(`    running  ${j.id}  ${who(j.owner)}  ${minutes(now - (j.startedAt ?? now))}  ${j.command}`);
+    for (const [i, j] of waiting.entries()) {
+      const extras = [j.lane === q.lanes.at(-1) ? "" : `lane ${j.lane}`, j.priority ? `priority ${j.priority}` : ""].filter(Boolean);
+      lines.push(`    #${i + 1}       ${j.id}  ${who(j.owner)}  waited ${minutes(now - j.since)}${extras.length ? ` (${extras.join(", ")})` : ""}  ${j.command}`);
+    }
+  }
+  return lines;
+}
+
+/** One-line footer summary: `coord B · work 5/8 · short 1/2 · 1 held · 2 in line · heavy 2/2+3`. */
+export function formatFooter(board: Board, policy: AgentPolicy, queues: Queues, me: string): string {
   const pools = Object.entries(policy.pools).map(([p, { cap }]) => `${p} ${used(board, p)}/${cap}`);
   const held = board.waitlist.filter(t => t.holdUntil !== undefined).length;
   const waiting = board.waitlist.length - held;
-  return [`coord ${labelOf(board, me) ?? "?"}`, ...pools, ...(held ? [`${held} held`] : []), ...(waiting ? [`${waiting} in line`] : [])].join(
+  const jobs = Object.entries(queues).map(([name, q]) => {
+    const running = board.jobs.filter(j => j.queue === name && j.state === "running").length;
+    const queued = board.jobs.filter(j => j.queue === name && j.state === "waiting").length;
+    return `${name} ${running}/${q.slots}${queued ? `+${queued}` : ""}`;
+  });
+  return [`coord ${labelOf(board, me) ?? "?"}`, ...pools, ...(held ? [`${held} held`] : []), ...(waiting ? [`${waiting} in line`] : []), ...jobs].join(
     " · ",
   );
 }

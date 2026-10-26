@@ -80,11 +80,40 @@ export interface BoardEvent {
     | "hold_granted"
     | "hold_used"
     | "hold_expired"
-    | "message_sent";
-  sessionId: string;
+    | "message_sent"
+    | "job_queued"
+    | "job_withdrawn"
+    | "job_refused"
+    | "job_started"
+    | "job_ended"
+    | "job_lost"
+    | "job_superseded"
+    | "job_reprioritized";
+  /** The omp session concerned; null for build jobs started outside any omp session. */
+  sessionId: string | null;
   /** The session's letter when the event happened. */
   label: string | null;
   data: Record<string, unknown>;
+}
+
+/** A build or test job in a queue (see `queues.ts`). */
+export interface Job {
+  id: string;
+  queue: string;
+  /** The omp session whose agent started it, or null (a terminal, a script). Fair share is per owner. */
+  owner: string | null;
+  lane: string;
+  priority: number;
+  /** Jobs with the same key are duplicates (e.g. "<checkout> ci"). */
+  key: string | undefined;
+  /** What runs, for display. */
+  command: string;
+  /** The runner's liveness socket and process id. */
+  socket: string;
+  pid: number;
+  state: "waiting" | "running" | "superseded";
+  since: number;
+  startedAt: number | undefined;
 }
 
 export interface Board {
@@ -94,16 +123,20 @@ export interface Board {
   messages: Message[];
   /** When each session sent its recent messages, for the rate limit. */
   sent: { sessionId: string; at: number }[];
+  jobs: Job[];
+  /** When each owner last had a job started in each queue, for fair share. */
+  served: { queue: string; owner: string | null; at: number }[];
   /** Events since the board was loaded, oldest first. Not board state: the store moves them to the log. */
   events: BoardEvent[];
 }
 
 export function emptyBoard(): Board {
-  return { sessions: [], slots: [], waitlist: [], messages: [], sent: [], events: [] };
+  return { sessions: [], slots: [], waitlist: [], messages: [], sent: [], jobs: [], served: [], events: [] };
 }
 
-function emit(board: Board, at: number, type: BoardEvent["type"], sessionId: string, data: Record<string, unknown> = {}): void {
-  board.events.push({ at, type, sessionId, label: labelOf(board, sessionId) ?? null, data });
+/** Appends an event to the board's log. For transitions in the domain modules only. */
+export function emit(board: Board, at: number, type: BoardEvent["type"], sessionId: string | null, data: Record<string, unknown> = {}): void {
+  board.events.push({ at, type, sessionId, label: sessionId === null ? null : (labelOf(board, sessionId) ?? null), data });
 }
 
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -134,6 +167,8 @@ export function removeSession(board: Board, policy: AgentPolicy, sessionId: stri
   board.waitlist = board.waitlist.filter(t => t.sessionId !== sessionId);
   board.messages = board.messages.filter(m => m.toId !== sessionId);
   board.sent = board.sent.filter(m => m.sessionId !== sessionId);
+  // Its fair-share history goes too; it would only grow, since a session id is never reused.
+  board.served = board.served.filter(s => s.owner !== sessionId);
   grantHolds(board, policy, now);
 }
 

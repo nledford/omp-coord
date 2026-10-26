@@ -22,11 +22,18 @@ import {
   takeInbox,
   takeNewHolds,
 } from "./domain/board.ts";
+import { decideCommand } from "./commands.ts";
+import { dropJobs, setJobPriority } from "./domain/queues.ts";
 import { type Beacon, isAlive, startBeacon } from "./infra/beacon.ts";
-import { readQueue } from "./infra/flock-queues.ts";
 import { BoardStore, stateDir } from "./infra/store.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./omp-api.ts";
 import { clock, formatFooter, formatStatus } from "./report.ts";
+
+/** How agents' queued commands start the runner: Bun running `cli.ts` next to this file. */
+const RUNNER_ARGV = (() => {
+  const bun = Bun.which("bun");
+  return bun ? [bun, join(import.meta.dir, "cli.ts")] : undefined;
+})();
 
 const TICK_MS = 2000;
 const PRUNE_EVERY_TICKS = 5;
@@ -130,8 +137,36 @@ export default function ompCoord(pi: ExtensionAPI): void {
     if (!rt || event.toolName !== "bash") return undefined;
     const command = event.input.command;
     if (typeof command !== "string") return undefined;
-    const rule = rt.config.refuseCommands.find(r => r.pattern.test(command));
-    return rule ? { block: true, reason: `omp-coord: ${rule.reason}` } : undefined;
+    if (!RUNNER_ARGV) {
+      // Without bun on PATH queued commands cannot be wrapped; only refusals apply.
+      const refused = rt.config.commands.find(r => r.action === "refuse" && r.pattern.test(command));
+      return refused?.action === "refuse" ? { block: true, reason: `omp-coord: ${refused.reason}` } : undefined;
+    }
+    const decision = decideCommand(rt.config.commands, command, { argv: RUNNER_ARGV, owner: rt.sessionId, config: rt.config.source });
+    if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
+    if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
+    return undefined;
+  });
+
+  pi.registerTool<{ job: string; priority: string }>({
+    name: "coord_job_priority",
+    label: "Reorder this session's queued jobs",
+    description:
+      "Changes the priority of one of this session's jobs waiting in a build/test queue (job ids are in coord_status). " +
+      "Higher goes first among this session's own jobs; it never moves them ahead of other sessions' jobs in fair-share queues. " +
+      "Use it when one waiting job matters more than another, e.g. a fix for an approved PR over a trial build.",
+    parameters: pi.zod.object({
+      job: pi.zod.string().describe("Job id from coord_status"),
+      priority: pi.zod.string().describe("Whole number; 0 is normal, higher goes first"),
+    }),
+    async execute(_id, params) {
+      const rt = shared.runtime;
+      if (!rt) return text(shared.inactive, true);
+      const priority = Number(params.priority);
+      if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
+      const result = rt.store.transact(board => setJobPriority(board, { id: params.job, sessionId: rt.sessionId, priority, now: Date.now() }));
+      return result.ok ? text(`Job ${params.job} now has priority ${priority}.`) : text(`Not changed: ${result.reason}.`, true);
+    },
   });
 
   pi.registerTool<Record<string, never>>({
@@ -144,7 +179,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
     async execute() {
       const rt = shared.runtime;
       if (!rt) return text(shared.inactive, true);
-      return text(await statusText(rt));
+      return text(statusText(rt));
     },
   });
 
@@ -181,7 +216,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         ctx.ui.notify(result.content[0]?.text ?? "", result.isError ? "error" : "info");
         return;
       }
-      ctx.ui.notify(await statusText(rt), "info");
+      ctx.ui.notify(statusText(rt), "info");
     },
   });
 }
@@ -210,6 +245,8 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const rt: Runtime = { config, ...joined, pi, ctx, timer: undefined, ticks: 0, footer: undefined, pruning: false };
   const { store, sessionId, label } = rt;
   shared.runtime = rt;
+  // `omp-coord run` started from this session's bash calls (e.g. by a `just` recipe) queues jobs as this session's.
+  process.env.OMP_COORD_SESSION = sessionId;
   rt.timer = ctx.setInterval(() => tick(rt), TICK_MS);
   await prune(rt);
 
@@ -248,6 +285,7 @@ function openSession(config: Config, cwd: string): Pick<Runtime, "store" | "beac
 
 function stop(rt: Runtime): void {
   shared.runtime = undefined;
+  if (process.env.OMP_COORD_SESSION === rt.sessionId) delete process.env.OMP_COORD_SESSION;
   rt.ctx.clearTimer(rt.timer);
   try {
     rt.store.transact(board => removeSession(board, rt.config.agents, rt.sessionId, Date.now()));
@@ -268,7 +306,7 @@ async function tick(rt: Runtime): Promise<void> {
     return {
       inbox: takeInbox(board, rt.sessionId),
       holds: takeNewHolds(board, rt.sessionId),
-      footer: formatFooter(board, rt.config.agents, rt.sessionId),
+      footer: formatFooter(board, rt.config.agents, rt.config.queues, rt.sessionId),
       label,
     };
   });
@@ -297,20 +335,27 @@ async function tick(rt: Runtime): Promise<void> {
   if (rt.ticks % PRUNE_EVERY_TICKS === 0) await prune(rt);
 }
 
-/** Removes sessions whose process is gone, freeing their slots and places in line. */
+/** Removes sessions and queued jobs whose process is gone, freeing their slots and places in line. */
 async function prune(rt: Runtime): Promise<void> {
   if (rt.pruning) return;
   rt.pruning = true;
   try {
-    const others = rt.store.read().sessions.filter(s => s.id !== rt.sessionId);
-    const alive = await Promise.all(others.map(s => isAlive(s.socket)));
-    const dead = others.filter((_, i) => !alive[i]);
-    if (dead.length && shared.runtime === rt) {
-      rt.store.transact(board => {
-        for (const s of dead) removeSession(board, rt.config.agents, s.id, Date.now());
+    const board = rt.store.read();
+    const others = board.sessions.filter(s => s.id !== rt.sessionId);
+    const jobs = board.jobs;
+    const [sessionsAlive, jobsAlive] = await Promise.all([
+      Promise.all(others.map(s => isAlive(s.socket))),
+      Promise.all(jobs.map(j => isAlive(j.socket))),
+    ]);
+    const dead = others.filter((_, i) => !sessionsAlive[i]);
+    const deadJobs = jobs.filter((_, i) => !jobsAlive[i]);
+    if ((dead.length || deadJobs.length) && shared.runtime === rt) {
+      rt.store.transact(b => {
+        for (const s of dead) removeSession(b, rt.config.agents, s.id, Date.now());
+        if (deadJobs.length) dropJobs(b, rt.config.queues, deadJobs.map(j => j.id), Date.now());
       });
-      // Nothing listens on these any more; the dead process could not remove its own.
-      for (const s of dead) rmSync(s.socket, { force: true });
+      // Nothing listens on these any more; the dead processes could not remove their own.
+      for (const x of [...dead, ...deadJobs]) rmSync(x.socket, { force: true });
     }
   } finally {
     rt.pruning = false;
@@ -322,9 +367,8 @@ function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
   return result.ok ? text(`Sent to ${result.delivered.join(", ")}.`) : text(`Not sent: ${result.reason}.`, true);
 }
 
-async function statusText(rt: Runtime): Promise<string> {
-  const queues = await Promise.all(rt.config.queues.map(q => readQueue(q)));
-  return formatStatus(rt.store.read(), rt.config.agents, rt.config.scope, rt.sessionId, queues);
+function statusText(rt: Runtime): string {
+  return formatStatus(rt.store.read(), rt.config.agents, rt.config.queues, rt.config.scope, rt.sessionId, Date.now());
 }
 
 function deliver(rt: Runtime, content: string): void {

@@ -11,32 +11,37 @@
     "holdMinutes": 5,
     "startTimeoutSeconds": 120
   },
+  "queues": {
+    "heavy": { "slots": 2, "order": "fair-share", "lanes": ["front", "normal"], "agingMinutes": 15 },
+    "test": { "slots": 3, "order": "fair-share", "agingMinutes": 10 }
+  },
   "messages": { "perMinute": 10 },
   "history": { "retentionDays": 30, "maxEvents": 100000 },
-  "refuseCommands": [
+  "commands": [
     {
       "pattern": "(^|[;&|(\\s])cargo\\s+(test|check|clippy)\\b",
-      "reason": "use the recipes (just test, just test-ui, just check, just lint): they wait for a test slot and keep the cores for the CI slots"
+      "action": "refuse",
+      "reason": "use the recipes (just test, just test-ui, just check, just lint): they queue for a test slot and set the test config folder"
     },
     {
       "pattern": "(^|[;&|(\\s])cargo\\s+xtask\\s+ci\\b",
-      "reason": "use just ci: it waits for a heavy-build slot"
+      "action": "refuse",
+      "reason": "use just ci: it queues for a heavy slot and writes the log"
     },
     {
       "pattern": "(^|[;&|(\\s])cargo\\s+build\\b[^;&|]*--release",
-      "reason": "use just build: it waits for a heavy-build slot"
+      "action": "refuse",
+      "reason": "use just build: it queues for a heavy slot"
     },
     {
       "pattern": "(^|[;&|(\\s])pkill\\b",
+      "action": "refuse",
       "reason": "pkill can stop other agents' builds and shells; stop only the process you started, by its PID"
     },
     {
       "pattern": "(^|[;&|(\\s])git\\s+(-C\\s+\\S+\\s+)?stash\\b",
+      "action": "refuse",
       "reason": "stashes are shared by all worktrees: commit to a throwaway branch instead"
     }
-  ],
-  "queues": [
-    { "name": "heavy", "dir": "/tmp/lightcraft-ci-slots", "slots": 2 },
-    { "name": "test", "dir": "/tmp/lightcraft-test-slots", "slots": 3 }
   ]
 }

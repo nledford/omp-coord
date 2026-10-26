@@ -6,30 +6,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { AgentPolicy } from "./domain/board.ts";
+import type { QueuePolicy, Queues } from "./domain/queues.ts";
 
 export const CONFIG_FILE = ".omp-coord.json";
 
-export interface CommandRule {
-  pattern: RegExp;
-  reason: string;
-}
-
-export interface QueueDir {
-  name: string;
-  /** Folder of a `flock`-based slot queue: `<n>.lock` files and a `queue/` folder of tickets. */
-  dir: string;
-  slots: number;
-}
+/** What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue. */
+export type CommandRule =
+  | { pattern: RegExp; action: "refuse"; reason: string }
+  | { pattern: RegExp; action: "queue"; queue: string; lane: string | undefined };
 
 export interface Config {
-  /** Sessions share caps, the line and messages only within one scope. */
+  /** Sessions share caps, the line, queues and messages only within one scope. */
   scope: string;
   /** Where the file was read from. */
   source: string;
   agents: AgentPolicy;
-  /** Bash commands refused to agents, each with the reason they are told. */
-  refuseCommands: CommandRule[];
-  queues: QueueDir[];
+  /** Rules for agents' bash commands, first match wins. */
+  commands: CommandRule[];
+  /** Build and test queues, machine-wide within the scope. */
+  queues: Queues;
   /** Retention of the event log. */
   history: { maxAgeMs: number; maxEvents: number };
 }
@@ -91,25 +86,43 @@ export function parseConfig(raw: unknown, source: string): Config {
   const messages = obj(root.messages ?? {}, "messages", fail);
   const history = obj(root.history ?? {}, "history", fail);
 
-  const refuseCommands = list(root.refuseCommands ?? [], "refuseCommands", fail).map((r, i) => {
-    const rule = obj(r, `refuseCommands[${i}]`, fail);
-    const pattern = str(rule.pattern, `refuseCommands[${i}].pattern`, fail);
-    let regex: RegExp;
-    try {
-      regex = new RegExp(pattern);
-    } catch (e) {
-      return fail(`refuseCommands[${i}].pattern`, `is not a valid regular expression (${e instanceof Error ? e.message : e})`);
-    }
-    return { pattern: regex, reason: str(rule.reason, `refuseCommands[${i}].reason`, fail) };
-  });
-
-  const queues = list(root.queues ?? [], "queues", fail).map((q, i) => {
-    const queue = obj(q, `queues[${i}]`, fail);
-    return {
-      name: str(queue.name, `queues[${i}].name`, fail),
-      dir: resolve(dirname(source), str(queue.dir, `queues[${i}].dir`, fail)),
-      slots: count(queue.slots, `queues[${i}].slots`, fail),
+  const queues: Queues = {};
+  for (const [name, value] of Object.entries(obj(root.queues ?? {}, "queues", fail))) {
+    const q = obj(value, `queues.${name}`, fail);
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) fail(`queues.${name}`, "is not a valid queue name: use letters, digits, '.', '_' and '-'");
+    const order = q.order ?? "fifo";
+    if (order !== "fifo" && order !== "fair-share" && order !== "priority") fail(`queues.${name}.order`, `must be "fifo", "fair-share" or "priority"`);
+    const onDuplicate = q.onDuplicate ?? "refuse";
+    if (onDuplicate !== "refuse" && onDuplicate !== "supersede") fail(`queues.${name}.onDuplicate`, `must be "refuse" or "supersede"`);
+    const lanes = strList(q.lanes ?? ["normal"], `queues.${name}.lanes`, fail);
+    if (lanes.length === 0 || new Set(lanes).size !== lanes.length) fail(`queues.${name}.lanes`, "must list at least one lane, each once");
+    queues[name] = {
+      slots: count(q.slots, `queues.${name}.slots`, fail),
+      order: order as QueuePolicy["order"],
+      lanes,
+      agingMs: q.agingMinutes === undefined ? null : count(q.agingMinutes, `queues.${name}.agingMinutes`, fail) * 60_000,
+      onDuplicate: onDuplicate as QueuePolicy["onDuplicate"],
     };
+  }
+
+  const commands = list(root.commands ?? [], "commands", fail).map((r, i): CommandRule => {
+    const field = `commands[${i}]`;
+    const rule = obj(r, field, fail);
+    const patternText = str(rule.pattern, `${field}.pattern`, fail);
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(patternText);
+    } catch (e) {
+      return fail(`${field}.pattern`, `is not a valid regular expression (${e instanceof Error ? e.message : e})`);
+    }
+    if (rule.action === "refuse") return { pattern, action: "refuse", reason: str(rule.reason, `${field}.reason`, fail) };
+    if (rule.action !== "queue") return fail(`${field}.action`, `must be "refuse" or "queue"`);
+    const queue = str(rule.queue, `${field}.queue`, fail);
+    const policy = queues[queue];
+    if (!policy) return fail(`${field}.queue`, `names no queue (${Object.keys(queues).join(", ") || "none defined"})`);
+    const lane = rule.lane === undefined ? undefined : str(rule.lane, `${field}.lane`, fail);
+    if (lane !== undefined && !policy.lanes.includes(lane)) fail(`${field}.lane`, `names no lane of queue ${queue} (${policy.lanes.join(", ")})`);
+    return { pattern, action: "queue", queue, lane };
   });
 
   return {
@@ -127,7 +140,7 @@ export function parseConfig(raw: unknown, source: string): Config {
       startTimeoutMs: count(agents.startTimeoutSeconds ?? 120, "agents.startTimeoutSeconds", fail) * 1000,
       messagesPerMinute: count(messages.perMinute ?? 10, "messages.perMinute", fail),
     },
-    refuseCommands,
+    commands,
     queues,
     history: {
       maxAgeMs: count(history.retentionDays ?? 30, "history.retentionDays", fail) * 24 * 3_600_000,

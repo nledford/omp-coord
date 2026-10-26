@@ -87,19 +87,10 @@ describe("board store", () => {
     expect(tighter.events().map(e => e.label)).toEqual(["D", "E"]);
   });
 
-  test("a database from before the tables (one JSON row) is replaced by the tables", () => {
-    const db = freshDb();
-    const raw = new Database(db);
-    raw.exec("CREATE TABLE board (id INTEGER PRIMARY KEY CHECK (id = 1), doc TEXT NOT NULL)");
-    raw.exec(`INSERT INTO board VALUES (1, '{"sessions":[{"id":"old"}]}')`);
-    raw.close();
-
-    const store = new BoardStore(db);
-    store.transact(join_("a"));
-    expect(store.read().sessions.map(s => s.label)).toEqual(["A"]);
-    const check = new Database(db, { readonly: true });
-    expect(check.query("SELECT name FROM sqlite_master WHERE name = 'board'").all()).toEqual([]);
-    expect(check.query("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+  test("events about build jobs started outside any omp session are kept with no session", () => {
+    const store = new BoardStore(freshDb());
+    store.transact(b => b.events.push({ at: Date.now(), type: "job_queued", sessionId: null, label: null, data: { job: "j1" } }));
+    expect(store.events().map(e => [e.type, e.sessionId])).toEqual([["job_queued", null]]);
   });
 
   test("several sessions opening a new database at once all get a working board", async () => {
@@ -120,7 +111,7 @@ describe("board store", () => {
     expect(new BoardStore(db).read().sessions).toHaveLength(8);
   });
 
-  test("a database from a newer version is refused rather than misread", () => {
+  test("a database with a different schema is refused rather than misread", () => {
     const db = freshDb();
     new BoardStore(db).close();
     const raw = new Database(db);

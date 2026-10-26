@@ -47,6 +47,7 @@ export interface ToolResult {
 }
 
 export type Block = { block: true; reason: string } | undefined;
+export type ToolCallResult = Block | { input: Record<string, unknown> };
 
 export interface Events {
   session_start: (event: unknown, ctx: ExtensionContext) => unknown;
@@ -54,7 +55,8 @@ export interface Events {
   agent_start: (event: unknown, ctx: ExtensionContext) => unknown;
   agent_end: (event: unknown, ctx: ExtensionContext) => unknown;
   before_subagent_spawn: (event: SpawnEvent, ctx: ExtensionContext) => Block | Promise<Block>;
-  tool_call: (event: ToolCallEvent, ctx: ExtensionContext) => Block | Promise<Block>;
+  /** May block the call, or replace the input it runs with. */
+  tool_call: (event: ToolCallEvent, ctx: ExtensionContext) => ToolCallResult | Promise<ToolCallResult>;
 }
 
 export interface ZodString {
