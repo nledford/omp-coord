@@ -4,7 +4,7 @@ An omp extension (TypeScript, runs inside omp's Bun runtime) and the `omp-coord`
 
 ## Commands
 
-- `just` lists the workflows. `just install`, then `just check` (typecheck, every test, version files agreeing) before every commit; `just test <file>` or `just test -t <pattern>` while iterating.
+- `just` lists the workflows. `just install`, then `just fmt` and `just check` (typecheck, Biome lint and format check, every test, version files agreeing) before every commit; `just test <file>` or `just test -t <pattern>` while iterating. Biome (`biome.json`) formats TypeScript and JSON; Markdown is written by hand. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so blame skips formatting commits.
 - A user-visible change adds a line under Unreleased in `CHANGELOG.md` in the same commit; mark a contract break **Breaking:** (the contract and the bump rules: `docs/versioning.md`). Never edit the version in `package.json` or `.omp-plugin/marketplace.json` by hand: `just release <fix|feature|breaking>` does it in the release commit. Releases are cut and published by a maintainer.
 - Load a working copy into omp: `just omp-dev` (scratch state folder; run it from a folder holding a scratch `.omp-coord.json`). Never point `OMP_COORD_STATE_DIR` at the real `~/.omp/run/omp-coord` while testing. `just events <scope>` reads that scratch board's event log.
 - Smoke test across sessions: two omp sessions in tmux in the same scratch folder, with caps of 1, so that one spawn fills a pool.

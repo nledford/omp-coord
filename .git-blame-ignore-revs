@@ -1,0 +1,6 @@
+# Mechanical commits that `git blame` should look past. Use with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub's blame view reads this file on its own.)
+
+# Format with Biome
+b8e886fe9556d674951335c5ef1479c7ac5cbf13

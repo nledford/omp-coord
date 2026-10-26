@@ -30,7 +30,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun test && bun scripts/release.ts verify"
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "check": "bun run typecheck && bun run lint && bun test && bun scripts/release.ts verify"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

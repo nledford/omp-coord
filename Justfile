@@ -32,14 +32,24 @@ unlink:
 typecheck:
     bun run typecheck
 
+# Format, organize imports and apply safe lint fixes (Biome; Markdown is left alone).
+[group('quality')]
+fmt:
+    bun run format
+
+# Check formatting and lint rules without changing files, as CI does.
+[group('quality')]
+lint:
+    bun run lint
+
 # Run tests; pass file names or `-t <pattern>` to narrow them.
 [group('quality')]
 test *args='':
     bun test {{ args }}
 
-# Run the full local check: typecheck, every test, and the version files agreeing. Run before each commit.
+# Run the full local check: typecheck, lint, every test, and the version files agreeing. Run before each commit.
 [group('quality')]
-check: typecheck test
+check: typecheck lint test
     @bun '{{ root }}/scripts/release.ts' verify
 
 # Show what a release would contain and the next version for each kind of change.

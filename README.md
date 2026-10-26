@@ -60,7 +60,8 @@ Every omp session started in that folder or below now shares 6 agent slots, and 
 
 ```sh
 just install
-just check   # typecheck, tests, version files agreeing
+just fmt     # format with Biome
+just check   # typecheck, lint, tests, version files agreeing
 just         # every workflow
 ```
 
