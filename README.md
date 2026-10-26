@@ -159,7 +159,7 @@ The database is meant to be read by other tools. Current state:
 Retention: events older than `history.retentionDays` and all but the newest `history.maxEvents` are deleted when a session starts and then at most once an hour. All times are milliseconds since the epoch.
 
 ```sh
-db=~/.omp/run/omp-coord/lightcraft.db
+db=~/.omp/run/omp-coord/my-project.db   # <scope>.db
 # Agent slots held right now, per session
 sqlite3 -column -header "$db" "select s.label, sl.pool, count(*) n from slots sl join sessions s on s.id = sl.session_id group by 1, 2"
 # How long sessions waited for a slot (minutes), per day
