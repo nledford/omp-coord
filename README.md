@@ -1,5 +1,10 @@
 # omp-coord
 
+[![CI](https://github.com/nledford/omp-coord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nledford/omp-coord/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/nledford/omp-coord)](https://github.com/nledford/omp-coord/releases/latest)
+[![omp](https://img.shields.io/badge/omp-%E2%89%A5%2018.12-blue)](https://github.com/can1357/oh-my-pi)
+[![License: MIT](https://img.shields.io/github/license/nledford/omp-coord)](LICENSE)
+
 An [omp](https://github.com/can1357/oh-my-pi) plugin, plus a small command-line runner, that lets several omp sessions on one machine, working in the same project, share one set of agent caps and build/test queues, and talk to each other.
 
 - **Shared agent caps.** Subagents count against pools (for example 8 `work` and 2 `short` slots) shared by every session in the project. A spawn over the cap is refused through omp's spawn check, so the cap does not depend on agents remembering to take and free slots.
@@ -16,7 +21,7 @@ Each session gets a letter and shows `coord B · work 5/8 · short 1/2` in omp's
 ## Quick start
 
 ```sh
-omp plugin install "git+ssh://git@github.com/nledford/omp-coord.git"
+omp plugin install github:nledford/omp-coord
 ```
 
 Then put a `.omp-coord.json` in the project's top folder:
@@ -36,7 +41,7 @@ Every omp session started in that folder or below now shares 6 agent slots, and 
 
 | | |
 |---|---|
-| [Install](docs/install.md) | Plugin install over SSH or the marketplace, updating, the `omp-coord` command. |
+| [Install](docs/install.md) | From GitHub, the marketplace or GitHub Packages; updating; the `omp-coord` command. |
 | [Configuration](docs/configuration.md) | Every `.omp-coord.json` field. |
 | [Agent slots](docs/agent-slots.md) | How caps, the line, holds and nested agents work. |
 | [Queues](docs/queues.md) | `omp-coord run`, order, lanes, time limits, agents' commands. |

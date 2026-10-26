@@ -1,5 +1,5 @@
-# Typecheck and tests. Linux on every push and pull request; macOS (the platform the plugin is used on, and
-# several times the cost on a private repository) on pushes to main.
+# Typecheck, lint and tests on every push and pull request, on Linux and on macOS (the platform the plugin is used
+# on). GitHub-hosted runners are free for public repositories.
 name: CI
 
 on:
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
