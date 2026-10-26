@@ -36,7 +36,7 @@ jobs:
   publish-npm:
     needs: check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write # trusted publishing: npm exchanges the job's OIDC token for a one-time publish token
@@ -50,6 +50,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          set -o pipefail
           version="${TAG#v}"
           registry=https://registry.npmjs.org
           node -e 'const v = process.argv[1], [a, b, c] = v.split(".").map(Number); if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) { console.error("npm " + v + " is older than 11.5.1, which trusted publishing needs"); process.exit(1); }' "$(npm --version)"
@@ -57,12 +58,20 @@ jobs:
             echo "@nledford/omp-coord@$version is already on npmjs.com"
             exit 0
           fi
-          npm publish --access public --registry "$registry"
-          for _ in 1 2 3 4 5 6; do
+          # A version npm already holds, even one still being processed, is refused as a conflict: that is a success.
+          if ! npm publish --access public --registry "$registry" 2>&1 | tee "$RUNNER_TEMP/publish.log"; then
+            if grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions" "$RUNNER_TEMP/publish.log"; then
+              echo "npm already holds @nledford/omp-coord@$version"
+              exit 0
+            fi
+            exit 1
+          fi
+          # npm processes a new version for some minutes before serving it; a successful publish is authoritative.
+          for _ in $(seq 90); do
             [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ] && exit 0
             sleep 10
           done
-          echo "npmjs.com does not serve @nledford/omp-coord@$version a minute after publishing"; exit 1
+          echo "::warning::npm accepted @nledford/omp-coord@$version but did not serve it within 15 minutes; check https://www.npmjs.com/package/@nledford/omp-coord"
 
   publish-github:
     needs: check
