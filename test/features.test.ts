@@ -141,7 +141,13 @@ describe("claims", () => {
     expect(by("gh api repos/o/r/issues/2913/comments -f body=hi")).toBe("2913");
 
     expect(by("gh api repos/o/r/pulls/2913")).toBeUndefined();
+    expect(by("gh api -X GET repos/o/r/pulls/2913/files -f per_page=100")).toBeUndefined();
+    expect(by("gh api --method=GET repos/o/r/pulls/2913/files -F per_page=100")).toBeUndefined();
     expect(by("gh pr merge --squash 2914 && echo 2913")).toBeUndefined();
+    expect(by('gh pr comment 100 --body "fixes the 2913 regression"')).toBeUndefined();
+    expect(by("gh pr comment 100 -b 'Supersedes #2913 and more'")).toBeUndefined();
+    expect(by('gh pr edit 100 --title="Port 2913 fix"')).toBeUndefined();
+    expect(by('gh pr edit 2913 --title "Port 100 fix"')).toBe("2913");
   });
 
   test("the guard leaves alone commit messages, nested worktrees and commands that cd out of a claimed worktree", () => {
@@ -162,7 +168,12 @@ describe("claims", () => {
     expect(by("git commit -am wip", "/repo/src")).toBe("/repo");
     expect(by(`cd ${mine} && git -C /repo commit -am wip`, "/tmp")).toBe("/repo");
     expect(by("git branch -m docs old-docs", mine)).toBe("docs");
+    expect(by("git checkout -m docs", mine)).toBe("docs");
+    expect(by("git switch -m docs", mine)).toBe("docs");
     expect(by("git push fork docs", mine)).toBe("docs");
+    expect(by("/usr/bin/git commit -am wip", "/repo/src")).toBe("/repo");
+    expect(by("cd /repo; git commit -am wip", "/tmp")).toBe("/repo");
+    expect(by(`cd ${mine}&&git commit -am wip`, "/repo")).toBeUndefined();
   });
 
   test("cd to the home folder resolves through it", () => {
@@ -171,6 +182,9 @@ describe("claims", () => {
     const by = (command: string) => claimConflict(b, { sessionId: "b", command, cwd: "/tmp", home: "/home/u" })?.target;
     expect(by("cd ~/repo/wt && git commit -am wip")).toBe("/home/u/repo/wt");
     expect(by('cd "$HOME/repo/wt" && git commit -am wip')).toBe("/home/u/repo/wt");
+    expect(claimConflict(b, { sessionId: "b", command: "cd && cd repo/wt && git commit -am wip", cwd: "/tmp", home: "/home/u" })?.target).toBe(
+      "/home/u/repo/wt",
+    );
   });
 });
 

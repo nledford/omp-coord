@@ -181,9 +181,10 @@ async function run(args: string[]): Promise<number> {
   };
 
   // A command that already holds a slot of this queue runs nested jobs of the same queue at once: waiting for a
-  // second slot of a one-slot queue would wait for itself forever.
+  // second slot of a one-slot queue would wait for itself forever. It stays in the outer job's process group, so the
+  // outer job's signals and time limit reach it directly; nothing is forwarded.
   if (process.env.OMP_COORD_JOB && process.env.OMP_COORD_QUEUE === queue) {
-    const { code, timedOut } = await spawnCommand(command, commandEnv({}), timeoutMs ?? null, attach);
+    const { code, timedOut } = await spawnCommand(command, commandEnv({}), timeoutMs ?? null, { ownGroup: false });
     if (timedOut) console.error(`omp-coord: stopped after the time limit`);
     return timedOut ? EXIT_TIMED_OUT : code;
   }
@@ -221,7 +222,7 @@ async function run(args: string[]): Promise<number> {
         stopRequested: () => (stopping ? 128 + signalNumber(stopping) : undefined),
         report: line => console.error(line),
         execute: limit =>
-          spawnCommand(command, commandEnv({ OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }), limit, attach),
+          spawnCommand(command, commandEnv({ OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }), limit, { ownGroup: true, onStart: attach }),
       },
     );
   });
@@ -252,40 +253,42 @@ function commandEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 /**
- * Runs the command in its own process group with the terminal's input and output, and returns its exit status
- * (128 + signal number when a signal ended it). `onStart` receives a function that passes a signal to the whole
- * group. With a time limit, the group gets SIGTERM when it passes; whatever of it is still running 10 s later
- * (`sh -c 'a && b'` exits on SIGTERM while `a` may not) gets SIGKILL before the slot is given back.
+ * Runs the command with the terminal's input and output and returns its exit status (128 + signal number when a
+ * signal ended it). With `ownGroup`, the command runs in its own process group, and `onStart` receives a function
+ * that passes a signal to the whole group. With a time limit, the command (its group, with `ownGroup`) gets SIGTERM
+ * when it passes; whatever of it is still running 10 s later (`sh -c 'a && b'` exits on SIGTERM while `a` may not)
+ * gets SIGKILL before the slot is given back.
  */
 async function spawnCommand(
   command: string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number | null,
-  onStart: (forward: (signal: NodeJS.Signals) => void) => void,
+  o: { ownGroup: true; onStart: (forward: (signal: NodeJS.Signals) => void) => void } | { ownGroup: false },
 ): Promise<{ code: number; timedOut: boolean }> {
-  const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env, detached: true });
-  const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+  const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env, detached: o.ownGroup });
+  const target = o.ownGroup ? -child.pid : child.pid;
+  const signal = (s: NodeJS.Signals | 0): boolean => {
     try {
-      process.kill(-child.pid, signal);
+      process.kill(target, s);
       return true;
     } catch {
-      return false; // the group is gone
+      return false; // gone
     }
   };
-  onStart(signalGroup);
+  if (o.ownGroup) o.onStart(signal);
   let termAt: number | undefined;
   const limit =
     timeoutMs === null
       ? undefined
       : setTimeout(() => {
           termAt = Date.now();
-          signalGroup("SIGTERM");
+          signal("SIGTERM");
         }, timeoutMs);
   const exitCode = await child.exited;
   clearTimeout(limit);
   if (termAt !== undefined) {
-    while (signalGroup(0) && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
-    signalGroup("SIGKILL");
+    while (signal(0) && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
+    signal("SIGKILL");
   }
   return { code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode, timedOut: termAt !== undefined };
 }

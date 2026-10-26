@@ -18,8 +18,14 @@ const GIT_CHANGES = /\bgit\b(?:\s+-C\s+\S+)?(?:\s+-[^\s]+)*\s+(commit|push|pull|
 const GH_PR_CHANGES = /\bgh\s+pr\s+(?:edit|comment|merge|close|reopen|ready|review|lock|unlock)\b([^;&|]*)/g;
 /** A `gh api` call with the rest of its shell command. */
 const GH_API = /\bgh\s+api\b([^;&|]*)/g;
+/** A quoted or single-word argument. */
+const ARG = String.raw`(?:'[^']*'|"(?:[^"\\]|\\.)*"|\S+)`;
+/** Text arguments of gh (`--body`, `--title`, …): a PR number in them is a mention, not the PR being changed. */
+const GH_TEXT_ARG = new RegExp(String.raw`\s(?:-[bt]|--body|--title|--subject)(?:=|\s+)${ARG}`, "g");
+/** git subcommands whose `-m` takes a message (for `branch`, `checkout` and `switch` it does not). */
+const GIT_WITH_MESSAGE = /\bgit\b[^;&|]*?\s(?:commit|tag|merge|stash|revert|notes)\b/;
 /** A message argument (`-m msg`, `-am msg`, `--message=msg`): text, not a branch name. */
-const MESSAGE_ARG = /\s(?:-[a-zA-Z]*m|--message)(?:=|\s+)(?:'[^']*'|"(?:[^"\\]|\\.)*"|\S+)/g;
+const MESSAGE_ARG = new RegExp(String.raw`\s(?:-[a-zA-Z]*m|--message)(?:=|\s+)${ARG}`, "g");
 
 export function normalizeTarget(kind: Claim["kind"], target: string, cwd: string): string {
   const t = target.trim();
@@ -82,7 +88,7 @@ export function claimConflict(board: Board, q: CommandQuery): Claim | undefined 
   const isRoot = q.isWorktreeRoot ?? (() => false);
   const worktree = others.find(c => c.kind === "worktree" && dirs.some(d => withinWorktree(d, c.target, isRoot)));
   if (worktree) return worktree;
-  const text = /\bbranch\s+-[mM]\b/.test(q.command) ? q.command : q.command.replace(MESSAGE_ARG, " ");
+  const text = GIT_WITH_MESSAGE.test(q.command) ? q.command.replace(MESSAGE_ARG, " ") : q.command;
   const words = new Set(
     text
       .split(/[\s:'"=]+/)
@@ -97,14 +103,16 @@ export function claimRefused(board: Board, sessionId: string, c: Claim, now: num
   emit(board, now, "claim_refused", sessionId, { kind: c.kind, target: c.target, holder: labelOf(board, c.sessionId) ?? null });
 }
 
-/** PR numbers a command changes: anywhere in a changing `gh pr` command, or in a `gh api` call that writes. */
+/** PR numbers a command changes: in a changing `gh pr` command outside its text arguments, or in a `gh api` write. */
 function prsChanged(command: string): Set<string> {
   const prs = new Set<string>();
   for (const [, rest = ""] of command.matchAll(GH_PR_CHANGES)) {
-    for (const m of rest.matchAll(/(?:^|\s)#?(\d+)(?=\s|$)|\/pull\/(\d+)\b/g)) prs.add(m[1] ?? m[2] ?? "");
+    for (const m of rest.replace(GH_TEXT_ARG, " ").matchAll(/(?:^|\s)#?(\d+)(?=\s|$)|\/pull\/(\d+)\b/g)) prs.add(m[1] ?? m[2] ?? "");
   }
   for (const [, rest = ""] of command.matchAll(GH_API)) {
-    const writes = /(?:-X|--method)[\s=]*['"]?(?:POST|PATCH|PUT|DELETE)\b|\s(?:-[fF]|--field|--raw-field|--input)\b/i.test(rest);
+    // gh api sends a POST when given fields, unless a method is named.
+    const method = /(?:-X|--method)[\s=]*['"]?([A-Za-z]+)/.exec(rest)?.[1]?.toUpperCase();
+    const writes = method === undefined ? /\s(?:-[fF]|--field|--raw-field|--input)\b/.test(rest) : method !== "GET" && method !== "HEAD";
     if (writes) for (const m of rest.matchAll(/\/(?:pulls|issues)\/(\d+)\b/g)) prs.add(m[1] ?? "");
   }
   return prs;
@@ -118,9 +126,9 @@ function prsChanged(command: string): Set<string> {
 function gitDirs(command: string, cwd: string, home: string | undefined): string[] {
   const dirs: string[] = [];
   let here: string | undefined = cwd;
-  for (const m of command.matchAll(/(?:^|[;&|(]\s*|\s)(?:cd(?:\s+(\S+))?(?=$|[\s;&|)])|git\b(?:\s+-C\s+(\S+))?)/g)) {
-    const [whole, cdTo, gitC] = m;
-    if (/(?:^|[;&|(]\s*|\s)cd\b/.test(whole)) {
+  const steps = /(?:^|[;&|(]\s*|\s)(?:(cd)(?:\s+([^\s;&|)]+))?(?=$|[\s;&|)])|(?:\S*\/)?git\b(?:\s+-C\s+([^\s;&|)]+))?)/g;
+  for (const [, cd, cdTo, gitC] of command.matchAll(steps)) {
+    if (cd !== undefined) {
       here = cdTo === undefined ? home : resolveDir(cdTo, here, home);
     } else {
       const dir = gitC === undefined ? here : resolveDir(gitC, here, home);

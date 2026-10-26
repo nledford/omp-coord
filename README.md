@@ -37,7 +37,7 @@ omp-coord status | stats [days] | interrupted [hours] | notes [count] | note <te
 omp-coord pause [reason…] | resume | doctor [--fix]
 ```
 
-- `run` waits for a slot of `<queue>`, runs the command with the terminal's input and output, and exits with the command's exit code. The command runs in its own process group, so a time limit stops everything it started. Ctrl-C while waiting leaves the line; while running, it is passed to the command.
+- `run` waits for a slot of `<queue>`, runs the command with the terminal's input and output, and exits with the command's exit code. The command runs in its own process group and session, so a time limit stops everything it started. Ctrl-C while waiting leaves the line; while running, it is passed to the command. The command has no controlling terminal: it reads and writes the terminal through its input and output, but prompts that open `/dev/tty` (sudo, ssh or gpg passphrases, git credential prompts) fail, and Ctrl-Z stops only the runner. A nested `run` on the same queue stays in the outer job's group.
 - **Lanes**: `--lane` picks one of the queue's `lanes`; earlier lanes go first. Without it, the job goes in the last lane.
 - **Duplicates**: jobs with the same `--key` (for example `"<checkout> ci"`) are duplicates. One that duplicates a running job is refused; one that duplicates a waiting job is refused or, with `onDuplicate: "supersede"`, replaces it in its place in line.
 - **Exit codes**: the command's own, `75` when the job was not run (a refused or superseded duplicate), `124` when its time limit stopped it, `2` for a usage or configuration error.
