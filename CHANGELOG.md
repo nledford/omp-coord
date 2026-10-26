@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-26
+
 ### Added
 
 - Shared subagent caps across omp sessions in one project, with pools, exempt agent types, limits on agents started by subagents, and a fair line: a refused session gets the next free slot, held for it for a few minutes.
@@ -19,3 +21,6 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - Reports from the event log: `omp-coord interrupted` (agents a crashed or closed session left mid-run) and `omp-coord stats`; `omp-coord doctor [--fix]`.
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
+
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nledford/omp-coord/releases/tag/v0.1.0
