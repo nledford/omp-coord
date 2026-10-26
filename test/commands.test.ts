@@ -10,7 +10,10 @@ const runner = { argv: ["/usr/local/bin/bun", "/opt/omp-coord/src/cli.ts"], owne
 
 describe("agents' bash commands", () => {
   test("a refused command is blocked with its reason", () => {
-    expect(decideCommand(rules, "pkill -f foo", runner)).toEqual({ kind: "refuse", reason: "stop only your own process" });
+    expect(decideCommand(rules, "pkill -f foo", runner)).toEqual({
+      kind: "refuse",
+      reason: "stop only your own process",
+    });
   });
 
   test("a queued command runs through the queue as the same shell command, owned by the session", () => {
@@ -39,7 +42,9 @@ describe("agents' bash commands", () => {
 
   test("a command already going through omp-coord, or matching no rule, is left alone", () => {
     expect(decideCommand(rules, "omp-coord run test -- cargo test", runner)).toEqual({ kind: "allow" });
-    expect(decideCommand(rules, "'/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts' run test -- cargo test", runner)).toEqual({ kind: "allow" });
+    expect(
+      decideCommand(rules, "'/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts' run test -- cargo test", runner),
+    ).toEqual({ kind: "allow" });
     expect(decideCommand(rules, "ls -la", runner)).toEqual({ kind: "allow" });
   });
 
@@ -50,11 +55,15 @@ describe("agents' bash commands", () => {
   });
 
   test("the queued shell command keeps its meaning", async () => {
-    const d = decideCommand([{ pattern: /echo/, action: "queue", queue: "q", lane: undefined }], `echo "it's" $((1+2)) | tr a-z A-Z`, {
-      argv: ["env"],
-      owner: "s",
-      config: "/c",
-    });
+    const d = decideCommand(
+      [{ pattern: /echo/, action: "queue", queue: "q", lane: undefined }],
+      `echo "it's" $((1+2)) | tr a-z A-Z`,
+      {
+        argv: ["env"],
+        owner: "s",
+        config: "/c",
+      },
+    );
     // Run what follows `--` as the runner would.
     const command = d.kind === "queue" ? d.command.slice(d.command.indexOf(" -- ") + 4) : "";
     const out = await Bun.$`sh -c ${command}`.text();

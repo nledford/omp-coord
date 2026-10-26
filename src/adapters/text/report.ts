@@ -5,8 +5,8 @@ import { capOf, used } from "../../domain/agents.ts";
 import { pauseReason } from "../../domain/control.ts";
 import type { DayStats, InterruptedSession } from "../../domain/history.ts";
 import { currentLoad } from "../../domain/limits.ts";
-import { type AgentPolicy, type Board, type Note, labelOf } from "../../domain/model.ts";
-import { type Queues, orderWaiting, slotsOf } from "../../domain/queues.ts";
+import { type AgentPolicy, type Board, labelOf, type Note } from "../../domain/model.ts";
+import { orderWaiting, type Queues, slotsOf } from "../../domain/queues.ts";
 
 export function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -18,9 +18,14 @@ const minutes = (ms: number) => `${Math.round(ms / 60_000)} min`;
 export function formatStatus(board: Board, config: Config, me: string, now: number): string {
   const policy = config.agents;
   const lines: string[] = [];
-  lines.push(me ? `This session: ${labelOf(board, me) ?? "(not registered)"} (scope ${config.scope})` : `Scope ${config.scope} (${config.source})`);
+  lines.push(
+    me
+      ? `This session: ${labelOf(board, me) ?? "(not registered)"} (scope ${config.scope})`
+      : `Scope ${config.scope} (${config.source})`,
+  );
   const paused = pauseReason(board);
-  if (paused) lines.push(`PAUSED: ${paused}, since ${clock(board.pause?.since ?? now)}. No new agent or queued job starts.`);
+  if (paused)
+    lines.push(`PAUSED: ${paused}, since ${clock(board.pause?.since ?? now)}. No new agent or queued job starts.`);
   const load = currentLoad(board, now);
   if (load !== undefined) lines.push(`Load: ${load}`);
 
@@ -57,7 +62,8 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
     const line = board.waitlist.filter(t => t.pool === pool).sort((a, b) => a.since - b.since);
     if (line.length === 0) continue;
     const entries = line.map(
-      (t, i) => `#${i + 1} ${labelOf(board, t.sessionId) ?? "?"}${t.holdUntil === undefined ? "" : ` (slot held until ${clock(t.holdUntil)})`}`,
+      (t, i) =>
+        `#${i + 1} ${labelOf(board, t.sessionId) ?? "?"}${t.holdUntil === undefined ? "" : ` (slot held until ${clock(t.holdUntil)})`}`,
     );
     lines.push(`Line for ${pool}: ${entries.join(", ")}`);
   }
@@ -65,7 +71,9 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
   if (board.claims.length) {
     lines.push("Claims:");
     for (const c of board.claims) {
-      lines.push(`  ${c.kind} ${c.target}: session ${labelOf(board, c.sessionId) ?? "?"} (${c.agentId}) since ${clock(c.since)}${c.note ? `: ${c.note}` : ""}`);
+      lines.push(
+        `  ${c.kind} ${c.target}: session ${labelOf(board, c.sessionId) ?? "?"} (${c.agentId}) since ${clock(c.since)}${c.note ? `: ${c.note}` : ""}`,
+      );
     }
   }
 
@@ -73,24 +81,37 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
   if (queueLines.length) lines.push("Build and test queues:", ...queueLines);
 
   const recent = board.notes.slice(-3);
-  if (recent.length) lines.push("Latest decisions (all: notes):", ...formatNotes(recent).split("\n").map(l => `  ${l}`));
+  if (recent.length)
+    lines.push(
+      "Latest decisions (all: notes):",
+      ...formatNotes(recent)
+        .split("\n")
+        .map(l => `  ${l}`),
+    );
   return lines.join("\n");
 }
 
 /** One block per queue: running jobs, then waiting jobs in the order they will start. */
 export function formatQueues(board: Board, queues: Queues, now: number): string[] {
   const lines: string[] = [];
-  const who = (owner: string | null) => (owner === null ? "outside omp" : `session ${labelOf(board, owner) ?? "(ended)"}`);
+  const who = (owner: string | null) =>
+    owner === null ? "outside omp" : `session ${labelOf(board, owner) ?? "(ended)"}`;
   for (const [name, q] of Object.entries(queues)) {
     const running = board.jobs.filter(j => j.queue === name && j.state === "running");
     const waiting = orderWaiting(q, name, board, now);
     const slots = slotsOf(board, q, now);
     const lowered = slots < q.slots && !board.pause ? ` (lowered from ${q.slots} under load)` : "";
     lines.push(`  ${name} (${q.order}): ${running.length}/${slots} running${lowered}, ${waiting.length} waiting`);
-    for (const j of running) lines.push(`    running  ${j.id}  ${who(j.owner)}  ${minutes(now - (j.startedAt ?? now))}  ${j.command}`);
+    for (const j of running)
+      lines.push(`    running  ${j.id}  ${who(j.owner)}  ${minutes(now - (j.startedAt ?? now))}  ${j.command}`);
     for (const [i, j] of waiting.entries()) {
-      const extras = [j.lane === q.lanes.at(-1) ? "" : `lane ${j.lane}`, j.priority ? `priority ${j.priority}` : ""].filter(Boolean);
-      lines.push(`    #${i + 1}       ${j.id}  ${who(j.owner)}  waited ${minutes(now - j.since)}${extras.length ? ` (${extras.join(", ")})` : ""}  ${j.command}`);
+      const extras = [
+        j.lane === q.lanes.at(-1) ? "" : `lane ${j.lane}`,
+        j.priority ? `priority ${j.priority}` : "",
+      ].filter(Boolean);
+      lines.push(
+        `    #${i + 1}       ${j.id}  ${who(j.owner)}  waited ${minutes(now - j.since)}${extras.length ? ` (${extras.join(", ")})` : ""}  ${j.command}`,
+      );
     }
   }
   return lines;
@@ -119,7 +140,10 @@ export function formatFooter(board: Board, policy: AgentPolicy, queues: Queues, 
 export function formatNotes(notes: Note[]): string {
   if (notes.length === 0) return "No notes yet.";
   return notes
-    .map(n => `#${n.id} ${new Date(n.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} ${n.label ? `session ${n.label}` : "outside omp"} (${n.author}): ${n.text}`)
+    .map(
+      n =>
+        `#${n.id} ${new Date(n.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} ${n.label ? `session ${n.label}` : "outside omp"} (${n.author}): ${n.text}`,
+    )
     .join("\n");
 }
 
@@ -127,7 +151,9 @@ export function formatInterrupted(sessions: InterruptedSession[]): string {
   if (sessions.length === 0) return "No session left agents running in that time.";
   const lines: string[] = [];
   for (const s of sessions) {
-    lines.push(`Session ${s.label ?? "?"} (${s.cwd ?? "folder unknown"}) left at ${new Date(s.leftAt).toLocaleString()} with ${s.agents.length} agent(s) mid-run:`);
+    lines.push(
+      `Session ${s.label ?? "?"} (${s.cwd ?? "folder unknown"}) left at ${new Date(s.leftAt).toLocaleString()} with ${s.agents.length} agent(s) mid-run:`,
+    );
     for (const a of s.agents) lines.push(`  ${a.id} (${a.type}), run started ${clock(a.startedAt)}`);
   }
   lines.push(
@@ -140,8 +166,13 @@ export function formatStats(days: DayStats[]): string {
   if (days.length === 0) return "No events in that time.";
   const lines: string[] = [];
   for (const d of days) {
-    const peaks = Object.entries(d.peakAgents).map(([p, n]) => `${p} ${n}`).join(", ") || "none";
-    lines.push(`${d.day}: ${d.refusals} spawn refusal(s), ${d.holdsUsed} held slot(s) used (longest wait ${minutes(d.maxHoldWaitMs)}), peak agents ${peaks}`);
+    const peaks =
+      Object.entries(d.peakAgents)
+        .map(([p, n]) => `${p} ${n}`)
+        .join(", ") || "none";
+    lines.push(
+      `${d.day}: ${d.refusals} spawn refusal(s), ${d.holdsUsed} held slot(s) used (longest wait ${minutes(d.maxHoldWaitMs)}), peak agents ${peaks}`,
+    );
     for (const [q, s] of Object.entries(d.queues)) {
       lines.push(
         `  ${q}: ${s.started} started, wait avg ${minutes(s.avgWaitMs)} / max ${minutes(s.maxWaitMs)}; ${s.ended} ended, ${s.failed} failed${s.timedOut ? ` (${s.timedOut} timed out)` : ""}`,

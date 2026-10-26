@@ -56,7 +56,8 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
       return { allowed: false, pool: null, reason };
     }
     const running = board.slots.filter(
-      s => s.sessionId === req.sessionId && s.parentId === req.parentAgentId && policy.nested.allow.includes(s.agentType),
+      s =>
+        s.sessionId === req.sessionId && s.parentId === req.parentAgentId && policy.nested.allow.includes(s.agentType),
     ).length;
     if (running >= policy.nested.maxRunningPerParent) {
       const reason = `a subagent may run ${policy.nested.maxRunningPerParent} ${listOr(policy.nested.allow)} at a time; wait for the running one to finish`;
@@ -91,7 +92,13 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
   if (!mine) board.waitlist.push(ticket);
   const line = board.waitlist.filter(t => t.pool === pool).sort((a, b) => a.since - b.since);
   const position = line.indexOf(ticket) + 1;
-  emit(board, req.now, "spawn_refused", req.sessionId, { agentType: req.agentType, pool, position, used: used(board, pool), cap });
+  emit(board, req.now, "spawn_refused", req.sessionId, {
+    agentType: req.agentType,
+    pool,
+    position,
+    used: used(board, pool),
+    cap,
+  });
   const normal = policy.pools[pool]?.cap ?? 0;
   const load = currentLoad(board, req.now);
   const why = board.pause
@@ -117,7 +124,11 @@ function addStartingSlot(board: Board, req: SpawnRequest, pool: string | null): 
     state: "starting",
     since: req.now,
   });
-  emit(board, req.now, "spawn_approved", req.sessionId, { agentType: req.agentType, pool, nested: req.parentIsSubagent });
+  emit(board, req.now, "spawn_approved", req.sessionId, {
+    agentType: req.agentType,
+    pool,
+    nested: req.parentIsSubagent,
+  });
 }
 
 /**
@@ -129,7 +140,14 @@ function addStartingSlot(board: Board, req: SpawnRequest, pool: string | null): 
 export function agentStarted(
   board: Board,
   policy: AgentPolicy,
-  a: { sessionId: string; agentId: string; parentId: string; parentIsSubagent: boolean; agentType: string; now: number },
+  a: {
+    sessionId: string;
+    agentId: string;
+    parentId: string;
+    parentIsSubagent: boolean;
+    agentType: string;
+    now: number;
+  },
 ): { pool: string; used: number; cap: number } | null {
   expire(board, policy, a.now);
   let slot = board.slots.find(s => s.sessionId === a.sessionId && s.agentId === a.agentId);
@@ -170,13 +188,25 @@ export function agentStarted(
     };
     board.slots.push(slot);
   }
-  const count = slot.pool === null ? null : { pool: slot.pool, used: used(board, slot.pool), cap: capOf(board, policy, slot.pool, a.now) };
-  emit(board, a.now, "run_started", a.sessionId, { agentId: a.agentId, agentType: a.agentType, ...(count ?? { pool: null }), revived });
+  const count =
+    slot.pool === null
+      ? null
+      : { pool: slot.pool, used: used(board, slot.pool), cap: capOf(board, policy, slot.pool, a.now) };
+  emit(board, a.now, "run_started", a.sessionId, {
+    agentId: a.agentId,
+    agentType: a.agentType,
+    ...(count ?? { pool: null }),
+    revived,
+  });
   return count;
 }
 
 /** An agent's run ended (finished, failed, or killed): its slot frees until it runs again. */
-export function agentEnded(board: Board, policy: AgentPolicy, a: { sessionId: string; agentId: string; now: number }): void {
+export function agentEnded(
+  board: Board,
+  policy: AgentPolicy,
+  a: { sessionId: string; agentId: string; now: number },
+): void {
   const slot = board.slots.find(s => s.sessionId === a.sessionId && s.agentId === a.agentId);
   if (slot) {
     board.slots = board.slots.filter(s => s !== slot);
@@ -213,7 +243,11 @@ export function grantHolds(board: Board, policy: AgentPolicy, now: number): void
       if (free <= 0) break;
       ticket.holdUntil = now + policy.holdMs;
       ticket.notified = false;
-      emit(board, now, "hold_granted", ticket.sessionId, { pool, until: ticket.holdUntil, waitedMs: now - ticket.since });
+      emit(board, now, "hold_granted", ticket.sessionId, {
+        pool,
+        until: ticket.holdUntil,
+        waitedMs: now - ticket.since,
+      });
       free--;
     }
   }

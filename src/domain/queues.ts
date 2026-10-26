@@ -12,7 +12,7 @@
  * Pure transitions over the shared `Board` (`model.ts`).
  */
 import { currentLoad, type LoadLimit, limitUnderLoad } from "./limits.ts";
-import { type Board, type Job, emit } from "./model.ts";
+import { type Board, emit, type Job } from "./model.ts";
 
 /** Priorities run from -MAX_PRIORITY to MAX_PRIORITY. */
 export const MAX_PRIORITY = 1_000_000;
@@ -57,16 +57,19 @@ export type EnqueueResult = { ok: true } | { ok: false; reason: string };
 /** Puts a job in line (or starts it at once when a slot is free). */
 export function enqueueJob(board: Board, queues: Queues, req: JobRequest): EnqueueResult {
   const policy = Object.hasOwn(queues, req.queue) ? queues[req.queue] : undefined;
-  if (!policy) return refuse(board, req, `no queue "${req.queue}"; queues: ${Object.keys(queues).join(", ") || "none"}`);
+  if (!policy)
+    return refuse(board, req, `no queue "${req.queue}"; queues: ${Object.keys(queues).join(", ") || "none"}`);
   const lane = req.lane ?? policy.lanes.at(-1) ?? "normal";
-  if (!policy.lanes.includes(lane)) return refuse(board, req, `no lane "${lane}" in queue ${req.queue}; lanes: ${policy.lanes.join(", ")}`);
+  if (!policy.lanes.includes(lane))
+    return refuse(board, req, `no lane "${lane}" in queue ${req.queue}; lanes: ${policy.lanes.join(", ")}`);
 
   let since = req.now;
   if (req.key !== undefined) {
     const same = board.jobs.filter(j => j.queue === req.queue && j.key === req.key && j.state !== "superseded");
     if (same.some(j => j.state === "running")) return refuse(board, req, `already running: ${req.key}; wait for it`);
     const waiting = same.find(j => j.state === "waiting");
-    if (waiting && policy.onDuplicate === "refuse") return refuse(board, req, `already in line: ${req.key}; not queuing it twice`);
+    if (waiting && policy.onDuplicate === "refuse")
+      return refuse(board, req, `already in line: ${req.key}; not queuing it twice`);
     if (waiting) {
       waiting.state = "superseded";
       since = waiting.since;
@@ -108,7 +111,11 @@ function refuse(board: Board, req: JobRequest, reason: string): EnqueueResult {
  * A job's runner is done with it: its command finished (with its exit code, `timedOut` when the queue's time limit
  * stopped it), or it left the line before starting.
  */
-export function jobEnded(board: Board, queues: Queues, j: { id: string; exitCode: number | null; timedOut?: boolean; now: number }): void {
+export function jobEnded(
+  board: Board,
+  queues: Queues,
+  j: { id: string; exitCode: number | null; timedOut?: boolean; now: number },
+): void {
   const job = board.jobs.find(x => x.id === j.id);
   if (!job) return;
   board.jobs = board.jobs.filter(x => x !== job);
@@ -136,7 +143,10 @@ export function dropJobs(board: Board, queues: Queues, ids: string[], now: numbe
 }
 
 /** Changes a waiting job's priority. Only the session that owns the job may. */
-export function setJobPriority(board: Board, r: { id: string; sessionId: string; priority: number; now: number }): EnqueueResult {
+export function setJobPriority(
+  board: Board,
+  r: { id: string; sessionId: string; priority: number; now: number },
+): EnqueueResult {
   if (!Number.isSafeInteger(r.priority) || Math.abs(r.priority) > MAX_PRIORITY) {
     return { ok: false, reason: `priority must be a whole number from -${MAX_PRIORITY} to ${MAX_PRIORITY}` };
   }
@@ -159,7 +169,12 @@ export function schedule(board: Board, queues: Queues, now: number): void {
       job.startedAt = now;
       board.served = board.served.filter(s => !(s.queue === name && s.owner === job.owner));
       board.served.push({ queue: name, owner: job.owner, at: now });
-      emit(board, now, "job_started", job.owner, { job: job.id, queue: name, lane: job.lane, waitedMs: now - job.since });
+      emit(board, now, "job_started", job.owner, {
+        job: job.id,
+        queue: name,
+        lane: job.lane,
+        waitedMs: now - job.since,
+      });
     }
   }
 }

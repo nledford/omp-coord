@@ -85,11 +85,14 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
   }
   if (Object.keys(pools).length === 0) fail("agents.pools", "needs at least one pool");
 
-  const defaultPool = agents.defaultPool === undefined ? Object.keys(pools)[0] : str(agents.defaultPool, "agents.defaultPool", fail);
-  if (defaultPool === undefined || !(defaultPool in pools)) fail("agents.defaultPool", `must name a pool (${Object.keys(pools).join(", ")})`);
+  const defaultPool =
+    agents.defaultPool === undefined ? Object.keys(pools)[0] : str(agents.defaultPool, "agents.defaultPool", fail);
+  if (defaultPool === undefined || !(defaultPool in pools))
+    fail("agents.defaultPool", `must name a pool (${Object.keys(pools).join(", ")})`);
 
   const exempt = agentTypeList(agents.exempt ?? [], "agents.exempt", fail);
-  for (const t of exempt) if (claimed.has(t)) fail("agents.exempt", `lists "${t}", which pool ${claimed.get(t)} also lists`);
+  for (const t of exempt)
+    if (claimed.has(t)) fail("agents.exempt", `lists "${t}", which pool ${claimed.get(t)} also lists`);
 
   const nested = obj(agents.nested ?? {}, "agents.nested", fail);
   const messages = obj(root.messages ?? {}, "messages", fail);
@@ -98,20 +101,26 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
   const queues: Queues = {};
   for (const [name, value] of Object.entries(obj(root.queues ?? {}, "queues", fail))) {
     const q = obj(value, `queues.${name}`, fail);
-    if (!/^[A-Za-z0-9._-]+$/.test(name)) fail(`queues.${name}`, "is not a valid queue name: use letters, digits, '.', '_' and '-'");
+    if (!/^[A-Za-z0-9._-]+$/.test(name))
+      fail(`queues.${name}`, "is not a valid queue name: use letters, digits, '.', '_' and '-'");
     const order = q.order ?? "fifo";
-    if (order !== "fifo" && order !== "fair-share" && order !== "priority") fail(`queues.${name}.order`, `must be "fifo", "fair-share" or "priority"`);
+    if (order !== "fifo" && order !== "fair-share" && order !== "priority")
+      fail(`queues.${name}.order`, `must be "fifo", "fair-share" or "priority"`);
     const onDuplicate = q.onDuplicate ?? "refuse";
-    if (onDuplicate !== "refuse" && onDuplicate !== "supersede") fail(`queues.${name}.onDuplicate`, `must be "refuse" or "supersede"`);
+    if (onDuplicate !== "refuse" && onDuplicate !== "supersede")
+      fail(`queues.${name}.onDuplicate`, `must be "refuse" or "supersede"`);
     const lanes = strList(q.lanes ?? ["normal"], `queues.${name}.lanes`, fail);
-    if (lanes.length === 0 || new Set(lanes).size !== lanes.length) fail(`queues.${name}.lanes`, "must list at least one lane, each once");
+    if (lanes.length === 0 || new Set(lanes).size !== lanes.length)
+      fail(`queues.${name}.lanes`, "must list at least one lane, each once");
     queues[name] = {
       slots: count(q.slots, `queues.${name}.slots`, fail),
       order: order as QueuePolicy["order"],
       lanes,
-      agingMs: q.agingMinutes === undefined ? null : count(q.agingMinutes, `queues.${name}.agingMinutes`, fail) * 60_000,
+      agingMs:
+        q.agingMinutes === undefined ? null : count(q.agingMinutes, `queues.${name}.agingMinutes`, fail) * 60_000,
       onDuplicate: onDuplicate as QueuePolicy["onDuplicate"],
-      timeoutMs: q.timeoutMinutes === undefined ? null : count(q.timeoutMinutes, `queues.${name}.timeoutMinutes`, fail) * 60_000,
+      timeoutMs:
+        q.timeoutMinutes === undefined ? null : count(q.timeoutMinutes, `queues.${name}.timeoutMinutes`, fail) * 60_000,
       loadSlots: loadLimits(q.loadSlots ?? [], `queues.${name}.loadSlots`, "slots", fail),
     };
   }
@@ -126,13 +135,15 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
     } catch (e) {
       return fail(`${field}.pattern`, `is not a valid regular expression (${e instanceof Error ? e.message : e})`);
     }
-    if (rule.action === "refuse") return { pattern, action: "refuse", reason: str(rule.reason, `${field}.reason`, fail) };
+    if (rule.action === "refuse")
+      return { pattern, action: "refuse", reason: str(rule.reason, `${field}.reason`, fail) };
     if (rule.action !== "queue") return fail(`${field}.action`, `must be "refuse" or "queue"`);
     const queue = str(rule.queue, `${field}.queue`, fail);
     const policy = queues[queue];
     if (!policy) return fail(`${field}.queue`, `names no queue (${Object.keys(queues).join(", ") || "none defined"})`);
     const lane = rule.lane === undefined ? undefined : str(rule.lane, `${field}.lane`, fail);
-    if (lane !== undefined && !policy.lanes.includes(lane)) fail(`${field}.lane`, `names no lane of queue ${queue} (${policy.lanes.join(", ")})`);
+    if (lane !== undefined && !policy.lanes.includes(lane))
+      fail(`${field}.lane`, `names no lane of queue ${queue} (${policy.lanes.join(", ")})`);
     return { pattern, action: "queue", queue, lane };
   });
 
@@ -147,10 +158,14 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
       perAgent: count(p.perAgent ?? 10, "resources.ports.perAgent", fail),
     };
     if (ports.to > 65_535 || ports.from > ports.to) fail("resources.ports", "must have from ≤ to ≤ 65535");
-    if (ports.perSession > ports.to - ports.from + 1) fail("resources.ports.perSession", "is larger than the whole range");
+    if (ports.perSession > ports.to - ports.from + 1)
+      fail("resources.ports.perSession", "is larger than the whole range");
     if (ports.perAgent > ports.perSession) fail("resources.ports.perAgent", "is larger than perSession");
   }
-  const scratch = resources.scratch === undefined ? undefined : resolve(dirname(source), str(resources.scratch, "resources.scratch", fail));
+  const scratch =
+    resources.scratch === undefined
+      ? undefined
+      : resolve(dirname(source), str(resources.scratch, "resources.scratch", fail));
 
   return {
     scope,
@@ -200,7 +215,8 @@ function strList(v: unknown, field: string, fail: Fail): string[] {
 }
 
 function count(v: unknown, field: string, fail: Fail, min = 1): number {
-  if (typeof v !== "number" || !Number.isInteger(v) || v < min) return fail(field, `must be a whole number of at least ${min}`);
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min)
+    return fail(field, `must be a whole number of at least ${min}`);
   return v;
 }
 
@@ -214,7 +230,8 @@ function loadLimits(v: unknown, field: string, limitKey: "cap" | "slots", fail: 
   return list(v, field, fail).map((x, i) => {
     const rule = obj(x, `${field}[${i}]`, fail);
     const above = rule.above;
-    if (typeof above !== "number" || !Number.isFinite(above) || above < 0) fail(`${field}[${i}].above`, "must be a load average of at least 0");
+    if (typeof above !== "number" || !Number.isFinite(above) || above < 0)
+      fail(`${field}[${i}].above`, "must be a load average of at least 0");
     return { above: above as number, limit: count(rule[limitKey], `${field}[${i}].${limitKey}`, fail, 0) };
   });
 }

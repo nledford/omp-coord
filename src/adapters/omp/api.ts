@@ -72,9 +72,18 @@ export interface ExtensionAPI {
     label: string;
     description: string;
     parameters: unknown;
-    execute(toolCallId: string, params: P, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext): Promise<ToolResult>;
+    execute(
+      toolCallId: string,
+      params: P,
+      signal: AbortSignal | undefined,
+      onUpdate: unknown,
+      ctx: ExtensionContext,
+    ): Promise<ToolResult>;
   }): void;
-  registerCommand(name: string, options: { description: string; handler(args: string, ctx: ExtensionContext): Promise<void> | void }): void;
+  registerCommand(
+    name: string,
+    options: { description: string; handler(args: string, ctx: ExtensionContext): Promise<void> | void },
+  ): void;
   sendMessage(
     message: { customType: string; content: string; display: boolean; attribution: "agent" | "user" },
     options: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside"; triggerTurn?: boolean },

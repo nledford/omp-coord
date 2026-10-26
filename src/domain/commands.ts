@@ -28,7 +28,8 @@ export interface Runner {
 
 export function decideCommand(rules: CommandRule[], command: string, runner: Runner): CommandDecision {
   // Already queued: a command that runs `omp-coord run`, or one this extension rewrote.
-  if (/(^|[;&|(\s'"/])omp-coord'?\s+'?run\b/.test(command) || runner.argv.every(a => command.includes(a))) return { kind: "allow" };
+  if (/(^|[;&|(\s'"/])omp-coord'?\s+'?run\b/.test(command) || runner.argv.every(a => command.includes(a)))
+    return { kind: "allow" };
   const rule = rules.find(r => r.pattern.test(command));
   if (!rule) return { kind: "allow" };
   if (rule.action === "refuse") return { kind: "refuse", reason: rule.reason };

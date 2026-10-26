@@ -1,7 +1,7 @@
 /** Sessions on the board: each registers under a letter (A, B, …) and leaves with everything it held. */
 import { grantHolds } from "./agents.ts";
 import { type AgentPolicy, type Board, emit } from "./model.ts";
-import { type PortPolicy, freeBlock } from "./ports.ts";
+import { freeBlock, type PortPolicy } from "./ports.ts";
 
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -19,9 +19,29 @@ export function registerSession(
   const taken = new Set(board.sessions.map(x => x.label));
   const label = [...LABELS].find(l => !taken.has(l));
   if (!label) throw new Error(`${LABELS.length} sessions are already registered`);
-  const block = ports && freeBlock(ports.from, ports.to, ports.perSession, board.sessions.flatMap(x => (x.ports ? [x.ports] : [])));
-  board.sessions.push({ id: s.id, label, pid: s.pid, cwd: s.cwd, socket: s.socket, startedAt: s.now, configHash: s.configHash, ports: block });
-  emit(board, s.now, "session_joined", s.id, { pid: s.pid, cwd: s.cwd, ...(block ? { ports: `${block.from}-${block.to}` } : {}) });
+  const block =
+    ports &&
+    freeBlock(
+      ports.from,
+      ports.to,
+      ports.perSession,
+      board.sessions.flatMap(x => (x.ports ? [x.ports] : [])),
+    );
+  board.sessions.push({
+    id: s.id,
+    label,
+    pid: s.pid,
+    cwd: s.cwd,
+    socket: s.socket,
+    startedAt: s.now,
+    configHash: s.configHash,
+    ports: block,
+  });
+  emit(board, s.now, "session_joined", s.id, {
+    pid: s.pid,
+    cwd: s.cwd,
+    ...(block ? { ports: `${block.from}-${block.to}` } : {}),
+  });
   return label;
 }
 

@@ -13,7 +13,8 @@ export type ClaimResult = { ok: true } | { ok: false; reason: string };
 const KINDS: Claim["kind"][] = ["branch", "worktree", "pr"];
 
 /** git subcommands that change a worktree, a branch or a remote. */
-const GIT_CHANGES = /\bgit\b(?:\s+-C\s+\S+)?(?:\s+-[^\s]+)*\s+(commit|push|pull|rebase|reset|checkout|switch|merge|cherry-pick|revert|am|apply|stash|restore|clean|rm|mv|tag|branch\s+-[dDmMf])\b/;
+const GIT_CHANGES =
+  /\bgit\b(?:\s+-C\s+\S+)?(?:\s+-[^\s]+)*\s+(commit|push|pull|rebase|reset|checkout|switch|merge|cherry-pick|revert|am|apply|stash|restore|clean|rm|mv|tag|branch\s+-[dDmMf])\b/;
 /** A `gh pr` subcommand that changes a PR, with the rest of its shell command. */
 const GH_PR_CHANGES = /\bgh\s+pr\s+(?:edit|comment|merge|close|reopen|ready|review|lock|unlock)\b([^;&|]*)/g;
 /** A `gh api` call with the rest of its shell command. */
@@ -42,18 +43,35 @@ export function claim(
   if (!c.target.trim()) return { ok: false, reason: "name what to claim" };
   const held = board.claims.find(x => x.kind === c.kind && x.target === c.target);
   if (held && held.sessionId !== c.sessionId) {
-    return { ok: false, reason: `${c.kind} ${c.target} is claimed by session ${labelOf(board, held.sessionId) ?? "?"} (${held.agentId}) since ${new Date(held.since).toISOString()}: ${held.note || "no note"}` };
+    return {
+      ok: false,
+      reason: `${c.kind} ${c.target} is claimed by session ${labelOf(board, held.sessionId) ?? "?"} (${held.agentId}) since ${new Date(held.since).toISOString()}: ${held.note || "no note"}`,
+    };
   }
   board.claims = board.claims.filter(x => x !== held);
-  board.claims.push({ kind: c.kind, target: c.target, sessionId: c.sessionId, agentId: c.agentId, note: c.note.trim(), since: c.now });
+  board.claims.push({
+    kind: c.kind,
+    target: c.target,
+    sessionId: c.sessionId,
+    agentId: c.agentId,
+    note: c.note.trim(),
+    since: c.now,
+  });
   emit(board, c.now, "claimed", c.sessionId, { kind: c.kind, target: c.target, agentId: c.agentId });
   return { ok: true };
 }
 
-export function release(board: Board, r: { sessionId: string; kind: Claim["kind"]; target: string; now: number }): ClaimResult {
+export function release(
+  board: Board,
+  r: { sessionId: string; kind: Claim["kind"]; target: string; now: number },
+): ClaimResult {
   const held = board.claims.find(x => x.kind === r.kind && x.target === r.target);
   if (!held) return { ok: false, reason: `${r.kind} ${r.target} is not claimed` };
-  if (held.sessionId !== r.sessionId) return { ok: false, reason: `${r.kind} ${r.target} is claimed by session ${labelOf(board, held.sessionId) ?? "?"}` };
+  if (held.sessionId !== r.sessionId)
+    return {
+      ok: false,
+      reason: `${r.kind} ${r.target} is claimed by session ${labelOf(board, held.sessionId) ?? "?"}`,
+    };
   board.claims = board.claims.filter(x => x !== held);
   emit(board, r.now, "released", r.sessionId, { kind: r.kind, target: r.target });
   return { ok: true };
@@ -100,19 +118,27 @@ export function claimConflict(board: Board, q: CommandQuery): Claim | undefined 
 
 /** Records a refusal for the event log. */
 export function claimRefused(board: Board, sessionId: string, c: Claim, now: number): void {
-  emit(board, now, "claim_refused", sessionId, { kind: c.kind, target: c.target, holder: labelOf(board, c.sessionId) ?? null });
+  emit(board, now, "claim_refused", sessionId, {
+    kind: c.kind,
+    target: c.target,
+    holder: labelOf(board, c.sessionId) ?? null,
+  });
 }
 
 /** PR numbers a command changes: in a changing `gh pr` command outside its text arguments, or in a `gh api` write. */
 function prsChanged(command: string): Set<string> {
   const prs = new Set<string>();
   for (const [, rest = ""] of command.matchAll(GH_PR_CHANGES)) {
-    for (const m of rest.replace(GH_TEXT_ARG, " ").matchAll(/(?:^|\s)#?(\d+)(?=\s|$)|\/pull\/(\d+)\b/g)) prs.add(m[1] ?? m[2] ?? "");
+    for (const m of rest.replace(GH_TEXT_ARG, " ").matchAll(/(?:^|\s)#?(\d+)(?=\s|$)|\/pull\/(\d+)\b/g))
+      prs.add(m[1] ?? m[2] ?? "");
   }
   for (const [, rest = ""] of command.matchAll(GH_API)) {
     // gh api sends a POST when given fields, unless a method is named.
     const method = /(?:-X|--method)[\s=]*['"]?([A-Za-z]+)/.exec(rest)?.[1]?.toUpperCase();
-    const writes = method === undefined ? /\s(?:-[fF]|--field|--raw-field|--input)\b/.test(rest) : method !== "GET" && method !== "HEAD";
+    const writes =
+      method === undefined
+        ? /\s(?:-[fF]|--field|--raw-field|--input)\b/.test(rest)
+        : method !== "GET" && method !== "HEAD";
     if (writes) for (const m of rest.matchAll(/\/(?:pulls|issues)\/(\d+)\b/g)) prs.add(m[1] ?? "");
   }
   return prs;
@@ -126,7 +152,8 @@ function prsChanged(command: string): Set<string> {
 function gitDirs(command: string, cwd: string, home: string | undefined): string[] {
   const dirs: string[] = [];
   let here: string | undefined = cwd;
-  const steps = /(?:^|[;&|(]\s*|\s)(?:(cd)(?:\s+([^\s;&|)]+))?(?=$|[\s;&|)])|(?:\S*\/)?git\b(?:\s+-C\s+([^\s;&|)]+))?)/g;
+  const steps =
+    /(?:^|[;&|(]\s*|\s)(?:(cd)(?:\s+([^\s;&|)]+))?(?=$|[\s;&|)])|(?:\S*\/)?git\b(?:\s+-C\s+([^\s;&|)]+))?)/g;
   for (const [, cd, cdTo, gitC] of command.matchAll(steps)) {
     if (cd !== undefined) {
       here = cdTo === undefined ? home : resolveDir(cdTo, here, home);

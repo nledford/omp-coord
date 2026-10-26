@@ -24,17 +24,25 @@ export function sendMessage(
   if (toAgent === "") return { ok: false, reason: "name the agent after the slash, e.g. B/RebaseWave1" };
   const all = session.toLowerCase() === "all";
   if (all && toAgent) return { ok: false, reason: "a message to a subagent goes to one session, not all" };
-  const targets = all ? board.sessions.filter(s => s.id !== m.from) : board.sessions.filter(s => s.label === session.toUpperCase());
+  const targets = all
+    ? board.sessions.filter(s => s.id !== m.from)
+    : board.sessions.filter(s => s.label === session.toUpperCase());
   if (session.toUpperCase() === sender.label) return { ok: false, reason: "a session cannot message itself" };
   if (targets.length === 0) {
     const others = board.sessions.filter(s => s.id !== m.from).map(s => s.label);
-    return { ok: false, reason: `no session ${session}; active: ${others.length ? others.join(", ") : "none besides this one"}` };
+    return {
+      ok: false,
+      reason: `no session ${session}; active: ${others.length ? others.join(", ") : "none besides this one"}`,
+    };
   }
 
   board.sent = board.sent.filter(x => m.now - x.at < MINUTE);
   const recent = board.sent.filter(x => x.sessionId === m.from).length;
   if (recent >= policy.messagesPerMinute) {
-    return { ok: false, reason: `rate limit: at most ${policy.messagesPerMinute} messages a minute; send one summary later` };
+    return {
+      ok: false,
+      reason: `rate limit: at most ${policy.messagesPerMinute} messages a minute; send one summary later`,
+    };
   }
   board.sent.push({ sessionId: m.from, at: m.now });
   for (const t of targets) board.messages.push({ fromId: m.from, toId: t.id, toAgent, text, sentAt: m.now });
@@ -44,7 +52,10 @@ export function sendMessage(
 }
 
 /** Removes and returns the messages waiting for a session or its subagents, oldest first. */
-export function takeInbox(board: Board, sessionId: string): { from: string; toAgent: string | undefined; text: string; sentAt: number }[] {
+export function takeInbox(
+  board: Board,
+  sessionId: string,
+): { from: string; toAgent: string | undefined; text: string; sentAt: number }[] {
   const mine = board.messages.filter(m => m.toId === sessionId);
   board.messages = board.messages.filter(m => m.toId !== sessionId);
   return mine

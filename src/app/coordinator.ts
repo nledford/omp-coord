@@ -6,23 +6,31 @@
  */
 import type { Config } from "../config.ts";
 import {
-  type SpawnDecision,
-  type SpawnRequest,
   agentEnded,
   agentStarted,
   expire,
   requestSpawn,
+  type SpawnDecision,
+  type SpawnRequest,
   takeNewHolds,
 } from "../domain/agents.ts";
-import { type ClaimResult, type CommandQuery, claim, claimConflict, claimRefused, normalizeTarget, release } from "../domain/claims.ts";
+import {
+  type ClaimResult,
+  type CommandQuery,
+  claim,
+  claimConflict,
+  claimRefused,
+  normalizeTarget,
+  release,
+} from "../domain/claims.ts";
 import { pause, resume } from "../domain/control.ts";
 import { type DayStats, type InterruptedSession, interrupted, stats } from "../domain/history.ts";
 import { observeLoad } from "../domain/limits.ts";
 import { type SendResult, sendMessage, takeInbox } from "../domain/messages.ts";
 import type { Board, Claim, Note } from "../domain/model.ts";
-import { type NoteResult, addNote } from "../domain/notes.ts";
+import { addNote, type NoteResult } from "../domain/notes.ts";
 import { type AgentPortsResult, agentPorts } from "../domain/ports.ts";
-import { type EnqueueResult, dropJobs, schedule, setJobPriority } from "../domain/queues.ts";
+import { dropJobs, type EnqueueResult, schedule, setJobPriority } from "../domain/queues.ts";
 import { registerSession, removeSession } from "../domain/sessions.ts";
 import type { BoardRepository, Clock, Liveness, LoadProbe } from "./ports.ts";
 
@@ -76,7 +84,11 @@ export class Coordinator {
   }
 
   #register(b: Board, me: SessionIdentity, now: number): string {
-    return registerSession(b, { id: me.id, pid: me.pid, cwd: me.cwd, socket: me.address, configHash: this.config.hash, now }, this.config.resources.ports);
+    return registerSession(
+      b,
+      { id: me.id, pid: me.pid, cwd: me.cwd, socket: me.address, configHash: this.config.hash, now },
+      this.config.resources.ports,
+    );
   }
 
   pause(by: string | null, reason: string): void {
@@ -91,7 +103,14 @@ export class Coordinator {
     });
   }
 
-  claim(c: { sessionId: string; agentId: string; kind: Claim["kind"]; target: string; note: string; cwd: string }): ClaimResult {
+  claim(c: {
+    sessionId: string;
+    agentId: string;
+    kind: Claim["kind"];
+    target: string;
+    note: string;
+    cwd: string;
+  }): ClaimResult {
     const target = normalizeTarget(c.kind, c.target, c.cwd);
     return this.repo.transact(b => claim(b, { ...c, target, now: this.clock.now() }));
   }
@@ -133,7 +152,13 @@ export class Coordinator {
     return this.repo.transact(b => requestSpawn(b, this.config.agents, { ...req, now: this.clock.now() }));
   }
 
-  agentStarted(a: { sessionId: string; agentId: string; parentId: string; parentIsSubagent: boolean; agentType: string }) {
+  agentStarted(a: {
+    sessionId: string;
+    agentId: string;
+    parentId: string;
+    parentIsSubagent: boolean;
+    agentType: string;
+  }) {
     return this.repo.transact(b => agentStarted(b, this.config.agents, { ...a, now: this.clock.now() }));
   }
 
@@ -171,7 +196,13 @@ export class Coordinator {
       this.repo.transact(b => {
         const now = this.clock.now();
         for (const s of deadSessions) removeSession(b, this.config.agents, s.id, now);
-        if (deadJobs.length) dropJobs(b, this.config.queues, deadJobs.map(j => j.id), now);
+        if (deadJobs.length)
+          dropJobs(
+            b,
+            this.config.queues,
+            deadJobs.map(j => j.id),
+            now,
+          );
       });
       for (const x of [...deadSessions, ...deadJobs]) this.liveness.forget(x.socket);
     }

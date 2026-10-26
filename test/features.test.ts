@@ -8,7 +8,7 @@ import { sendMessage, takeInbox } from "../src/domain/messages.ts";
 import { type AgentPolicy, type Board, type BoardEvent, emptyBoard } from "../src/domain/model.ts";
 import { addNote } from "../src/domain/notes.ts";
 import { agentPorts } from "../src/domain/ports.ts";
-import { type QueuePolicy, enqueueJob, jobEnded } from "../src/domain/queues.ts";
+import { enqueueJob, jobEnded, type QueuePolicy } from "../src/domain/queues.ts";
 import { registerSession, removeSession } from "../src/domain/sessions.ts";
 
 const MIN = 60_000;
@@ -22,25 +22,46 @@ const policy: AgentPolicy = {
   messagesPerMinute: 10,
 };
 const queues: Record<string, QueuePolicy> = {
-  heavy: { slots: 2, order: "fifo", lanes: ["normal"], agingMs: null, onDuplicate: "refuse", timeoutMs: null, loadSlots: [{ above: 100, limit: 1 }] },
+  heavy: {
+    slots: 2,
+    order: "fifo",
+    lanes: ["normal"],
+    agingMs: null,
+    onDuplicate: "refuse",
+    timeoutMs: null,
+    loadSlots: [{ above: 100, limit: 1 }],
+  },
 };
 
 function boardWith(...ids: string[]): Board {
   const b = emptyBoard();
-  for (const id of ids) registerSession(b, { id, pid: 1, cwd: `/w/${id}`, socket: `/s/${id}`, configHash: "h", now: 0 });
+  for (const id of ids)
+    registerSession(b, { id, pid: 1, cwd: `/w/${id}`, socket: `/s/${id}`, configHash: "h", now: 0 });
   return b;
 }
 const spawn = (b: Board, session: string, agentType = "task", now = 0) =>
   requestSpawn(b, policy, { sessionId: session, parentAgentId: "Main", parentIsSubagent: false, agentType, now });
 const job = (b: Board, id: string, now = 0) =>
-  enqueueJob(b, queues, { id, queue: "heavy", owner: null, priority: 0, command: "c", socket: `/s/${id}`, pid: 1, now });
+  enqueueJob(b, queues, {
+    id,
+    queue: "heavy",
+    owner: null,
+    priority: 0,
+    command: "c",
+    socket: `/s/${id}`,
+    pid: 1,
+    now,
+  });
 
 describe("pause and drain", () => {
   test("while paused, new agents and queued jobs wait; running ones go on; resuming lets them start", () => {
     const b = boardWith("a");
     job(b, "j1");
     pause(b, { by: "a", reason: "merging tools", now: 1 });
-    expect(spawn(b, "a", "task", 2)).toMatchObject({ allowed: false, reason: expect.stringMatching(/paused by session A: merging tools/) });
+    expect(spawn(b, "a", "task", 2)).toMatchObject({
+      allowed: false,
+      reason: expect.stringMatching(/paused by session A: merging tools/),
+    });
     expect(spawn(b, "a", "reviewer", 2).allowed).toBe(true);
     job(b, "j2", 3);
     expect(b.jobs.map(j => j.state)).toEqual(["running", "waiting"]);
@@ -55,8 +76,16 @@ describe("pause and drain", () => {
     const one: AgentPolicy = { ...policy, pools: { work: { cap: 1, agentTypes: [], loadCaps: [] } } };
     const b = boardWith("a", "b", "c");
     requestSpawn(b, one, { sessionId: "a", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
-    agentStarted(b, one, { sessionId: "a", agentId: "A1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
-    for (const s of ["b", "c"]) requestSpawn(b, one, { sessionId: s, parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
+    agentStarted(b, one, {
+      sessionId: "a",
+      agentId: "A1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 0,
+    });
+    for (const s of ["b", "c"])
+      requestSpawn(b, one, { sessionId: s, parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
     agentEnded(b, one, { sessionId: "a", agentId: "A1", now: 2 });
     expect(b.waitlist.find(t => t.sessionId === "b")?.holdUntil).toBe(2 + one.holdMs);
 
@@ -67,7 +96,15 @@ describe("pause and drain", () => {
       ["b", 61 * MIN + one.holdMs],
       ["c", undefined],
     ]);
-    expect(requestSpawn(b, one, { sessionId: "b", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 62 * MIN }).allowed).toBe(true);
+    expect(
+      requestSpawn(b, one, {
+        sessionId: "b",
+        parentAgentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 62 * MIN,
+      }).allowed,
+    ).toBe(true);
   });
 });
 
@@ -86,27 +123,56 @@ describe("load-aware limits", () => {
     expect(b.jobs.map(j => j.state)).toEqual(["running", "running", "waiting"]);
     const stale = boardWith("x");
     observeLoad(stale, 500, 0);
-    expect(requestSpawn(stale, policy, { sessionId: "x", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 10 * MIN }).allowed).toBe(true);
-    expect(requestSpawn(stale, policy, { sessionId: "x", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", now: 10 * MIN }).allowed).toBe(true);
+    expect(
+      requestSpawn(stale, policy, {
+        sessionId: "x",
+        parentAgentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 10 * MIN,
+      }).allowed,
+    ).toBe(true);
+    expect(
+      requestSpawn(stale, policy, {
+        sessionId: "x",
+        parentAgentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 10 * MIN,
+      }).allowed,
+    ).toBe(true);
   });
 });
 
 describe("claims", () => {
   test("a claim is exclusive to its session, ends with it, and can be released", () => {
     const b = boardWith("a", "b");
-    expect(claim(b, { sessionId: "a", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 0 })).toEqual({ ok: true });
-    expect(claim(b, { sessionId: "b", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 1 })).toMatchObject({
+    expect(claim(b, { sessionId: "a", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 0 })).toEqual({
+      ok: true,
+    });
+    expect(
+      claim(b, { sessionId: "b", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 1 }),
+    ).toMatchObject({
       ok: false,
       reason: expect.stringMatching(/session A/),
     });
     expect(release(b, { sessionId: "b", kind: "branch", target: "fix-x", now: 2 })).toMatchObject({ ok: false });
     removeSession(b, policy, "a", 3);
-    expect(claim(b, { sessionId: "b", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 4 })).toEqual({ ok: true });
+    expect(claim(b, { sessionId: "b", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 4 })).toEqual({
+      ok: true,
+    });
   });
 
   test("git and gh commands that change another session's claimed branch, worktree or PR are refused", () => {
     const b = boardWith("a", "b");
-    claim(b, { sessionId: "a", agentId: "W1", kind: "worktree", target: "/repo/.claude/worktrees/w1", note: "", now: 0 });
+    claim(b, {
+      sessionId: "a",
+      agentId: "W1",
+      kind: "worktree",
+      target: "/repo/.claude/worktrees/w1",
+      note: "",
+      now: 0,
+    });
     claim(b, { sessionId: "a", agentId: "Main", kind: "branch", target: "fix-x", note: "", now: 0 });
     claim(b, { sessionId: "a", agentId: "Main", kind: "pr", target: "2913", note: "", now: 0 });
     const by = (command: string, cwd = "/repo") => claimConflict(b, { sessionId: "b", command, cwd })?.target;
@@ -182,9 +248,14 @@ describe("claims", () => {
     const by = (command: string) => claimConflict(b, { sessionId: "b", command, cwd: "/tmp", home: "/home/u" })?.target;
     expect(by("cd ~/repo/wt && git commit -am wip")).toBe("/home/u/repo/wt");
     expect(by('cd "$HOME/repo/wt" && git commit -am wip')).toBe("/home/u/repo/wt");
-    expect(claimConflict(b, { sessionId: "b", command: "cd && cd repo/wt && git commit -am wip", cwd: "/tmp", home: "/home/u" })?.target).toBe(
-      "/home/u/repo/wt",
-    );
+    expect(
+      claimConflict(b, {
+        sessionId: "b",
+        command: "cd && cd repo/wt && git commit -am wip",
+        cwd: "/tmp",
+        home: "/home/u",
+      })?.target,
+    ).toBe("/home/u/repo/wt");
   });
 });
 
@@ -205,7 +276,8 @@ describe("port ranges", () => {
 
   test("each session gets its own block, reused once its session is gone", () => {
     const b = emptyBoard();
-    const reg = (id: string) => registerSession(b, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 }, ports);
+    const reg = (id: string) =>
+      registerSession(b, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 }, ports);
     reg("a");
     reg("b");
     expect(b.sessions.map(s => s.ports)).toEqual([
@@ -219,10 +291,23 @@ describe("port ranges", () => {
 
   test("agents take blocks from their session's range, keep them, and run out with a clear reason", () => {
     const b = emptyBoard();
-    registerSession(b, { id: "a", pid: 1, cwd: "/w", socket: "/s/a", configHash: "h", now: 0 }, { ...ports, perSession: 20 });
-    expect(agentPorts(b, { sessionId: "a", agentId: "X", perAgent: 10 })).toEqual({ ok: true, ports: { from: 18700, to: 18709 } });
-    expect(agentPorts(b, { sessionId: "a", agentId: "Y", perAgent: 10 })).toEqual({ ok: true, ports: { from: 18710, to: 18719 } });
-    expect(agentPorts(b, { sessionId: "a", agentId: "X", perAgent: 10 })).toEqual({ ok: true, ports: { from: 18700, to: 18709 } });
+    registerSession(
+      b,
+      { id: "a", pid: 1, cwd: "/w", socket: "/s/a", configHash: "h", now: 0 },
+      { ...ports, perSession: 20 },
+    );
+    expect(agentPorts(b, { sessionId: "a", agentId: "X", perAgent: 10 })).toEqual({
+      ok: true,
+      ports: { from: 18700, to: 18709 },
+    });
+    expect(agentPorts(b, { sessionId: "a", agentId: "Y", perAgent: 10 })).toEqual({
+      ok: true,
+      ports: { from: 18710, to: 18719 },
+    });
+    expect(agentPorts(b, { sessionId: "a", agentId: "X", perAgent: 10 })).toEqual({
+      ok: true,
+      ports: { from: 18700, to: 18709 },
+    });
     expect(agentPorts(b, { sessionId: "a", agentId: "Z", perAgent: 10 })).toMatchObject({ ok: false });
   });
 });
@@ -230,7 +315,10 @@ describe("port ranges", () => {
 describe("messages to another session's subagent", () => {
   test("`B/Name` reaches that agent in session B", () => {
     const b = boardWith("a", "b");
-    expect(sendMessage(b, policy, { from: "a", to: "B/RebaseWave1", text: "main moved", now: 0 })).toEqual({ ok: true, delivered: ["B/RebaseWave1"] });
+    expect(sendMessage(b, policy, { from: "a", to: "B/RebaseWave1", text: "main moved", now: 0 })).toEqual({
+      ok: true,
+      delivered: ["B/RebaseWave1"],
+    });
     expect(takeInbox(b, "b")).toEqual([{ from: "A", toAgent: "RebaseWave1", text: "main moved", sentAt: 0 }]);
   });
 });
@@ -245,20 +333,50 @@ describe("history from the event log", () => {
   test("agents still running when their session left are listed, with the session's folder", () => {
     const events = log(b => {
       spawn(b, "a");
-      agentStarted(b, policy, { sessionId: "a", agentId: "Fix1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
-      agentStarted(b, policy, { sessionId: "a", agentId: "Done", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
+      agentStarted(b, policy, {
+        sessionId: "a",
+        agentId: "Fix1",
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 1,
+      });
+      agentStarted(b, policy, {
+        sessionId: "a",
+        agentId: "Done",
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 1,
+      });
       agentEnded(b, policy, { sessionId: "a", agentId: "Done", now: 2 });
       removeSession(b, policy, "a", 3);
     });
-    expect(interrupted(events, 0)).toEqual([{ label: "A", cwd: "/w/a", leftAt: 3, agents: [{ id: "Fix1", type: "task", startedAt: 1 }] }]);
+    expect(interrupted(events, 0)).toEqual([
+      { label: "A", cwd: "/w/a", leftAt: 3, agents: [{ id: "Fix1", type: "task", startedAt: 1 }] },
+    ]);
   });
 
   test("stats count refusals, waits, peak agents and job outcomes per day", () => {
     const events = log(b => {
       spawn(b, "a", "task", 0);
-      agentStarted(b, policy, { sessionId: "a", agentId: "A1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
+      agentStarted(b, policy, {
+        sessionId: "a",
+        agentId: "A1",
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 0,
+      });
       spawn(b, "b", "task", 0);
-      agentStarted(b, policy, { sessionId: "b", agentId: "B1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 0 });
+      agentStarted(b, policy, {
+        sessionId: "b",
+        agentId: "B1",
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 0,
+      });
       spawn(b, "b", "task", MIN);
       job(b, "j1", 0);
       job(b, "j2", 0);
@@ -269,6 +387,13 @@ describe("history from the event log", () => {
     const s = stats(events, 0);
     expect(s.days).toHaveLength(1);
     expect(s.days[0]).toMatchObject({ refusals: 1, peakAgents: { work: 2 } });
-    expect(s.days[0]?.queues.heavy).toEqual({ started: 3, avgWaitMs: 40_000, maxWaitMs: 2 * MIN, ended: 2, failed: 2, timedOut: 1 });
+    expect(s.days[0]?.queues.heavy).toEqual({
+      started: 3,
+      avgWaitMs: 40_000,
+      maxWaitMs: 2 * MIN,
+      ended: 2,
+      failed: 2,
+      timedOut: 1,
+    });
   });
 });

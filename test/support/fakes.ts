@@ -1,6 +1,6 @@
 /** In-memory stand-ins for the application's ports. */
 import type { BoardRepository, Clock, Listener, Liveness } from "../../src/app/ports.ts";
-import { type Board, type BoardEvent, type Note, emptyBoard } from "../../src/domain/model.ts";
+import { type Board, type BoardEvent, emptyBoard, type Note } from "../../src/domain/model.ts";
 
 /** Same contract as the SQLite store: a change that throws leaves the board and the log unchanged. */
 export class MemoryRepository implements BoardRepository {

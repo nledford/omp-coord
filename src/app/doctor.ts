@@ -24,7 +24,12 @@ export interface DoctorFacts {
   now: number;
 }
 
-export async function doctor(coordinator: Coordinator, liveness: Liveness, facts: DoctorFacts, fix: boolean): Promise<Finding[]> {
+export async function doctor(
+  coordinator: Coordinator,
+  liveness: Liveness,
+  facts: DoctorFacts,
+  fix: boolean,
+): Promise<Finding[]> {
   const out: Finding[] = [];
   const { config } = facts;
   out.push({ level: "ok", text: `config ${config.source} (scope ${config.scope}, hash ${config.hash})` });
@@ -32,27 +37,45 @@ export async function doctor(coordinator: Coordinator, liveness: Liveness, facts
   out.push(
     (facts.stateDirMode & 0o077) === 0
       ? { level: "ok", text: "state folder is private to you" }
-      : { level: "error", text: `state folder is readable by others (mode ${(facts.stateDirMode & 0o777).toString(8)}); run chmod 700 on it` },
+      : {
+          level: "error",
+          text: `state folder is readable by others (mode ${(facts.stateDirMode & 0o777).toString(8)}); run chmod 700 on it`,
+        },
   );
   if (!facts.cliOnPath) {
-    out.push({ level: "warn", text: "omp-coord is not on PATH, so scripts cannot call it by name: run `bun link` in the omp-coord folder, or call it by path" });
+    out.push({
+      level: "warn",
+      text: "omp-coord is not on PATH, so scripts cannot call it by name: run `bun link` in the omp-coord folder, or call it by path",
+    });
   }
 
   const board = coordinator.board();
   const differing = board.sessions.filter(s => s.configHash !== config.hash);
   out.push(
     differing.length
-      ? { level: "warn", text: `sessions ${differing.map(s => s.label).join(", ")} read a different .omp-coord.json than ${config.source}; caps and rules disagree until they use the same file` }
+      ? {
+          level: "warn",
+          text: `sessions ${differing.map(s => s.label).join(", ")} read a different .omp-coord.json than ${config.source}; caps and rules disagree until they use the same file`,
+        }
       : { level: "ok", text: `${board.sessions.length} session(s) on the board, all with this config` },
   );
 
-  const alive = await Promise.all([...board.sessions.map(s => liveness.isAlive(s.socket)), ...board.jobs.map(j => liveness.isAlive(j.socket))]);
+  const alive = await Promise.all([
+    ...board.sessions.map(s => liveness.isAlive(s.socket)),
+    ...board.jobs.map(j => liveness.isAlive(j.socket)),
+  ]);
   const deadCount = alive.filter(a => !a).length;
   if (deadCount && fix) {
     const dropped = await coordinator.prune("");
-    out.push({ level: "ok", text: `dropped ${dropped.sessions} session(s) and ${dropped.jobs} job(s) whose process was gone` });
+    out.push({
+      level: "ok",
+      text: `dropped ${dropped.sessions} session(s) and ${dropped.jobs} job(s) whose process was gone`,
+    });
   } else if (deadCount) {
-    out.push({ level: "warn", text: `${deadCount} session(s) or job(s) on the board have no live process; a running session drops them within 10 s, or run doctor --fix` });
+    out.push({
+      level: "warn",
+      text: `${deadCount} session(s) or job(s) on the board have no live process; a running session drops them within 10 s, or run doctor --fix`,
+    });
   }
 
   const known = new Set([...board.sessions.map(s => s.socket), ...board.jobs.map(j => j.socket)]);
@@ -69,6 +92,9 @@ export async function doctor(coordinator: Coordinator, liveness: Liveness, facts
   const paused = pauseReason(board);
   if (paused) out.push({ level: "warn", text: `${paused}; \`omp-coord resume\` or /coord resume lifts it` });
   const load = currentLoad(board, facts.now);
-  out.push({ level: "ok", text: load === undefined ? "no recent load reading (no session or runner active)" : `load ${load}` });
+  out.push({
+    level: "ok",
+    text: load === undefined ? "no recent load reading (no session or runner active)" : `load ${load}`,
+  });
   return out;
 }

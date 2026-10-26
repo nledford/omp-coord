@@ -21,10 +21,12 @@ export function interrupted(events: BoardEvent[], since: number): InterruptedSes
     const runs = running.get(e.sessionId) ?? new Map();
     running.set(e.sessionId, runs);
     if (e.type === "session_joined" && typeof e.data.cwd === "string") cwd.set(e.sessionId, e.data.cwd);
-    if (e.type === "run_started") runs.set(String(e.data.agentId), { id: String(e.data.agentId), type: String(e.data.agentType), startedAt: e.at });
+    if (e.type === "run_started")
+      runs.set(String(e.data.agentId), { id: String(e.data.agentId), type: String(e.data.agentType), startedAt: e.at });
     if (e.type === "run_ended") runs.delete(String(e.data.agentId));
     if (e.type === "session_left") {
-      if (e.at >= since && runs.size) result.push({ label: e.label, cwd: cwd.get(e.sessionId), leftAt: e.at, agents: [...runs.values()] });
+      if (e.at >= since && runs.size)
+        result.push({ label: e.label, cwd: cwd.get(e.sessionId), leftAt: e.at, agents: [...runs.values()] });
       running.delete(e.sessionId);
     }
   }

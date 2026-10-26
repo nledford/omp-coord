@@ -24,13 +24,34 @@ function boardWith(...ids: string[]): Board {
 
 /** Spawns and starts a top-level agent, the way omp does: approval in the parent, then the child's first run. */
 function run(board: Board, session: string, agentId: string, agentType = "task", now = 0) {
-  const decision = requestSpawn(board, policy, { sessionId: session, parentAgentId: "Main", parentIsSubagent: false, agentType, spawnKey: agentId, now });
-  if (decision.allowed) agentStarted(board, policy, { sessionId: session, agentId, parentId: "Main", parentIsSubagent: false, agentType, now });
+  const decision = requestSpawn(board, policy, {
+    sessionId: session,
+    parentAgentId: "Main",
+    parentIsSubagent: false,
+    agentType,
+    spawnKey: agentId,
+    now,
+  });
+  if (decision.allowed)
+    agentStarted(board, policy, {
+      sessionId: session,
+      agentId,
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType,
+      now,
+    });
   return decision;
 }
 
 function spawn(board: Board, session: string, agentType = "task", now = 0) {
-  return requestSpawn(board, policy, { sessionId: session, parentAgentId: "Main", parentIsSubagent: false, agentType, now });
+  return requestSpawn(board, policy, {
+    sessionId: session,
+    parentAgentId: "Main",
+    parentIsSubagent: false,
+    agentType,
+    now,
+  });
 }
 
 describe("agent cap across sessions", () => {
@@ -64,15 +85,36 @@ describe("agent cap across sessions", () => {
   test("an approved spawn counts at once, and its first run does not count it twice", () => {
     const board = boardWith("a");
     expect(spawn(board, "a").allowed).toBe(true);
-    agentStarted(board, policy, { sessionId: "a", agentId: "Main.Kid", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "Main.Kid",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 1,
+    });
     expect(spawn(board, "a").allowed).toBe(true);
     expect(spawn(board, "a").allowed).toBe(false);
   });
 
   test("an agent whose spawn key is a label rather than its id still claims its approved slot", () => {
     const board = boardWith("a");
-    requestSpawn(board, policy, { sessionId: "a", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", spawnKey: "CleanseDiscovery", now: 0 });
-    agentStarted(board, policy, { sessionId: "a", agentId: "CleanseDiscovery-2", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 1 });
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "CleanseDiscovery",
+      now: 0,
+    });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "CleanseDiscovery-2",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 1,
+    });
     expect(spawn(board, "a", "task", 2).allowed).toBe(true);
     expect(spawn(board, "a", "task", 3).allowed).toBe(false);
   });
@@ -140,7 +182,14 @@ describe("revived agents", () => {
     agentEnded(board, policy, { sessionId: "a", agentId: "A1", now: 1 });
     run(board, "a", "A3", "task", 2);
 
-    const revived = agentStarted(board, policy, { sessionId: "a", agentId: "A1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 3 });
+    const revived = agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "A1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 3,
+    });
     expect(revived).toEqual({ pool: "work", used: 3, cap: 2 });
     agentEnded(board, policy, { sessionId: "a", agentId: "A2", now: 4 });
     expect(spawn(board, "a", "task", 5).allowed).toBe(false);
@@ -152,12 +201,35 @@ describe("revived agents", () => {
     const scoutsNest: AgentPolicy = { ...policy, nested: { allow: ["scout"], maxRunningPerParent: 1 } };
     const board = boardWith("a");
     run(board, "a", "A1");
-    requestSpawn(board, scoutsNest, { sessionId: "a", parentAgentId: "A1", parentIsSubagent: true, agentType: "scout", spawnKey: "A1.S", now: 1 });
-    agentStarted(board, scoutsNest, { sessionId: "a", agentId: "A1.S", parentId: "A1", parentIsSubagent: true, agentType: "scout", now: 2 });
+    requestSpawn(board, scoutsNest, {
+      sessionId: "a",
+      parentAgentId: "A1",
+      parentIsSubagent: true,
+      agentType: "scout",
+      spawnKey: "A1.S",
+      now: 1,
+    });
+    agentStarted(board, scoutsNest, {
+      sessionId: "a",
+      agentId: "A1.S",
+      parentId: "A1",
+      parentIsSubagent: true,
+      agentType: "scout",
+      now: 2,
+    });
     agentEnded(board, scoutsNest, { sessionId: "a", agentId: "A1.S", now: 3 });
     agentEnded(board, scoutsNest, { sessionId: "a", agentId: "A1", now: 4 });
 
-    expect(agentStarted(board, scoutsNest, { sessionId: "a", agentId: "A1.S", parentId: "A1", parentIsSubagent: true, agentType: "scout", now: 5 })).toBeNull();
+    expect(
+      agentStarted(board, scoutsNest, {
+        sessionId: "a",
+        agentId: "A1.S",
+        parentId: "A1",
+        parentIsSubagent: true,
+        agentType: "scout",
+        now: 5,
+      }),
+    ).toBeNull();
     expect(run(board, "a", "S1", "scout", 6).allowed).toBe(true);
   });
 });
@@ -167,11 +239,32 @@ describe("revival while a sibling is starting", () => {
     const board = boardWith("a");
     run(board, "a", "X");
     agentEnded(board, policy, { sessionId: "a", agentId: "X", now: 1 });
-    requestSpawn(board, policy, { sessionId: "a", parentAgentId: "Main", parentIsSubagent: false, agentType: "task", spawnKey: "Y", now: 2 });
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "Y",
+      now: 2,
+    });
     board.events = [];
 
-    agentStarted(board, policy, { sessionId: "a", agentId: "X", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 3 });
-    agentStarted(board, policy, { sessionId: "a", agentId: "Y", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 4 });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "X",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 3,
+    });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "Y",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 4,
+    });
     expect(board.events.map(e => [e.data.agentId, e.data.revived])).toEqual([
       ["X", true],
       ["Y", false],
@@ -181,7 +274,13 @@ describe("revival while a sibling is starting", () => {
 
 describe("agents started by subagents", () => {
   function nested(board: Board, parent: string, agentType: string, now = 0) {
-    return requestSpawn(board, policy, { sessionId: "a", parentAgentId: parent, parentIsSubagent: true, agentType, now });
+    return requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: parent,
+      parentIsSubagent: true,
+      agentType,
+      now,
+    });
   }
 
   test("a subagent may not start a worker", () => {
@@ -195,7 +294,14 @@ describe("agents started by subagents", () => {
     run(board, "a", "A1");
     run(board, "a", "A2");
     expect(nested(board, "A1", "reviewer").allowed).toBe(true);
-    agentStarted(board, policy, { sessionId: "a", agentId: "A1.R", parentId: "A1", parentIsSubagent: true, agentType: "reviewer", now: 1 });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "A1.R",
+      parentId: "A1",
+      parentIsSubagent: true,
+      agentType: "reviewer",
+      now: 1,
+    });
     expect(nested(board, "A1", "reviewer", 2).allowed).toBe(false);
     expect(nested(board, "A2", "reviewer", 2).allowed).toBe(true);
 
@@ -207,7 +313,8 @@ describe("agents started by subagents", () => {
 describe("sessions", () => {
   test("each session gets the first free letter, and a letter is reused once its session is gone", () => {
     const board = emptyBoard();
-    const reg = (id: string) => registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 });
+    const reg = (id: string) =>
+      registerSession(board, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now: 0 });
     expect([reg("x"), reg("y"), reg("z")]).toEqual(["A", "B", "C"]);
     removeSession(board, policy, "y", 1);
     expect(reg("w")).toBe("B");
@@ -229,7 +336,10 @@ describe("sessions", () => {
 describe("messages", () => {
   test("a message reaches only the named session, once", () => {
     const board = boardWith("a", "b", "c");
-    expect(sendMessage(board, policy, { from: "a", to: "B", text: "CLAIM x", now: 0 })).toEqual({ ok: true, delivered: ["B"] });
+    expect(sendMessage(board, policy, { from: "a", to: "B", text: "CLAIM x", now: 0 })).toEqual({
+      ok: true,
+      delivered: ["B"],
+    });
     expect(takeInbox(board, "c")).toEqual([]);
     expect(takeInbox(board, "b")).toEqual([{ from: "A", toAgent: undefined, text: "CLAIM x", sentAt: 0 }]);
     expect(takeInbox(board, "b")).toEqual([]);
@@ -237,7 +347,10 @@ describe("messages", () => {
 
   test("a message to all reaches every other session", () => {
     const board = boardWith("a", "b", "c");
-    expect(sendMessage(board, policy, { from: "a", to: "all", text: "main moved", now: 0 })).toEqual({ ok: true, delivered: ["B", "C"] });
+    expect(sendMessage(board, policy, { from: "a", to: "all", text: "main moved", now: 0 })).toEqual({
+      ok: true,
+      delivered: ["B", "C"],
+    });
     expect(takeInbox(board, "a")).toEqual([]);
   });
 
@@ -249,7 +362,8 @@ describe("messages", () => {
 
   test("a session that sends too fast is refused until a minute has passed", () => {
     const board = boardWith("a", "b");
-    for (let i = 0; i < 3; i++) expect(sendMessage(board, policy, { from: "a", to: "B", text: `m${i}`, now: i }).ok).toBe(true);
+    for (let i = 0; i < 3; i++)
+      expect(sendMessage(board, policy, { from: "a", to: "B", text: `m${i}`, now: i }).ok).toBe(true);
     expect(sendMessage(board, policy, { from: "a", to: "B", text: "m3", now: 10 })).toMatchObject({ ok: false });
     expect(sendMessage(board, policy, { from: "a", to: "B", text: "m4", now: MIN + 1 }).ok).toBe(true);
   });
@@ -300,8 +414,17 @@ describe("event log", () => {
     run(board, "a", "A3", "task", 2);
     board.events = [];
 
-    agentStarted(board, policy, { sessionId: "a", agentId: "A1", parentId: "Main", parentIsSubagent: false, agentType: "task", now: 3 });
-    expect(log(board)).toEqual([["run_started", "A", { agentId: "A1", agentType: "task", pool: "work", used: 3, cap: 2, revived: true }]]);
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "A1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 3,
+    });
+    expect(log(board)).toEqual([
+      ["run_started", "A", { agentId: "A1", agentType: "task", pool: "work", used: 3, cap: 2, revived: true }],
+    ]);
   });
 
   test("sessions joining and leaving, and messages, are recorded without the message text", () => {

@@ -31,7 +31,8 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export function parseVersion(text: string): Version {
   const m = VERSION.exec(text);
-  if (!m) throw new Error(`not a release version: "${text}" (expected X.Y.Z, without a leading v or a -prerelease suffix)`);
+  if (!m)
+    throw new Error(`not a release version: "${text}" (expected X.Y.Z, without a leading v or a -prerelease suffix)`);
   return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
 }
 
@@ -50,7 +51,16 @@ export function compareVersions(a: Version, b: Version): number {
  * major, minor and patch.
  */
 export function nextVersion(released: Version, change: Change): Version {
-  const level = released.major === 0 ? (change === "breaking" ? "minor" : "patch") : change === "breaking" ? "major" : change === "feature" ? "minor" : "patch";
+  const level =
+    released.major === 0
+      ? change === "breaking"
+        ? "minor"
+        : "patch"
+      : change === "breaking"
+        ? "major"
+        : change === "feature"
+          ? "minor"
+          : "patch";
   if (level === "major") return { major: released.major + 1, minor: 0, patch: 0 };
   if (level === "minor") return { ...released, minor: released.minor + 1, patch: 0 };
   return { ...released, patch: released.patch + 1 };
@@ -88,12 +98,17 @@ export function cutChangelog(input: string, version: string, date: string, previ
   const changelog = input.replaceAll("\r\n", "\n");
   const unreleased = changelogSection(changelog, "Unreleased");
   if (unreleased === undefined) throw new Error(`${FILES.changelog} has no "## [Unreleased]" section`);
-  if (unreleased === "") throw new Error(`${FILES.changelog}: the Unreleased section is empty; describe the changes in this release first`);
-  if (changelogSection(changelog, version) !== undefined) throw new Error(`${FILES.changelog} already has a section for ${version}`);
+  if (unreleased === "")
+    throw new Error(`${FILES.changelog}: the Unreleased section is empty; describe the changes in this release first`);
+  if (changelogSection(changelog, version) !== undefined)
+    throw new Error(`${FILES.changelog} already has a section for ${version}`);
   const body = changelog.replace(/^## \[Unreleased\].*$/m, `## [Unreleased]\n\n## [${version}] - ${date}`);
-  const versionLink = previous === undefined ? `${REPO_URL}/releases/tag/v${version}` : `${REPO_URL}/compare/v${previous}...v${version}`;
+  const versionLink =
+    previous === undefined ? `${REPO_URL}/releases/tag/v${version}` : `${REPO_URL}/compare/v${previous}...v${version}`;
   const links = `[Unreleased]: ${REPO_URL}/compare/v${version}...HEAD\n[${version}]: ${versionLink}`;
-  return /^\[Unreleased\]: .*$/m.test(body) ? body.replace(/^\[Unreleased\]: .*$/m, links) : `${body.trimEnd()}\n\n${links}\n`;
+  return /^\[Unreleased\]: .*$/m.test(body)
+    ? body.replace(/^\[Unreleased\]: .*$/m, links)
+    : `${body.trimEnd()}\n\n${links}\n`;
 }
 
 /** Replaces the `"version": "…"` value in a JSON file's text without reformatting it. */
@@ -112,7 +127,9 @@ function read(file: string): string {
 
 function versions(): { pkg: string; catalog: string } {
   const pkg = (JSON.parse(read(FILES.pkg)) as { version: string }).version;
-  const plugin = (JSON.parse(read(FILES.catalog)) as { plugins: { name: string; version?: string }[] }).plugins.find(p => p.name === "omp-coord");
+  const plugin = (JSON.parse(read(FILES.catalog)) as { plugins: { name: string; version?: string }[] }).plugins.find(
+    p => p.name === "omp-coord",
+  );
   return { pkg, catalog: plugin?.version ?? "(none)" };
 }
 
@@ -130,10 +147,12 @@ async function released(): Promise<Version | undefined> {
 function verify(tag: string | undefined): void {
   const v = versions();
   parseVersion(v.pkg);
-  if (v.pkg !== v.catalog) throw new Error(`${FILES.pkg} says ${v.pkg} but ${FILES.catalog} says ${v.catalog}; they must match`);
+  if (v.pkg !== v.catalog)
+    throw new Error(`${FILES.pkg} says ${v.pkg} but ${FILES.catalog} says ${v.catalog}; they must match`);
   if (tag !== undefined) {
     if (tag !== `v${v.pkg}`) throw new Error(`tag ${tag} does not match version ${v.pkg}`);
-    if (!changelogSection(read(FILES.changelog), v.pkg)) throw new Error(`${FILES.changelog} has no entry for ${v.pkg}`);
+    if (!changelogSection(read(FILES.changelog), v.pkg))
+      throw new Error(`${FILES.changelog} has no entry for ${v.pkg}`);
   }
   console.log(`version ${v.pkg}${tag ? `, tag ${tag}` : ""}: ok`);
 }
@@ -146,19 +165,23 @@ async function plan(): Promise<void> {
   const commits = await git("log", "--format=  %h %s", range);
   console.log(`Last release: ${last ? `v${formatVersion(last)}` : "none"}; version files say ${pkg}.`);
   console.log(`\nCommits since: ${commits ? `\n${commits}` : "none"}`);
-  console.log(`\nChangelog, Unreleased:\n${unreleased ? unreleased.replace(/^/gm, "  ") : "  (empty: write it before releasing)"}`);
+  console.log(
+    `\nChangelog, Unreleased:\n${unreleased ? unreleased.replace(/^/gm, "  ") : "  (empty: write it before releasing)"}`,
+  );
   if (!last) {
     console.log(`\nNo release yet: the first one is \`just release ${pkg}\`.`);
     return;
   }
   console.log("\nNext version, by the most significant change since the last release:");
-  for (const c of ["breaking", "feature", "fix"] as const) console.log(`  just release ${c.padEnd(8)}  ${formatVersion(nextVersion(last, c))}`);
+  for (const c of ["breaking", "feature", "fix"] as const)
+    console.log(`  just release ${c.padEnd(8)}  ${formatVersion(nextVersion(last, c))}`);
 }
 
 async function prepare(arg: string | undefined): Promise<void> {
   if (!arg) throw new Error("usage: prepare <breaking|feature|fix|X.Y.Z[-pre]>");
   verify(undefined);
-  if (await git("status", "--porcelain")) throw new Error("the work tree has uncommitted changes; commit or stash them first");
+  if (await git("status", "--porcelain"))
+    throw new Error("the work tree has uncommitted changes; commit or stash them first");
   if ((await git("rev-parse", "--abbrev-ref", "HEAD")) !== "main") throw new Error("releases are cut from main");
   await git("fetch", "--quiet", "origin", "main", "--tags");
   if (await git("rev-list", "HEAD..origin/main")) throw new Error("main is behind origin/main; pull first");
@@ -171,7 +194,8 @@ async function prepare(arg: string | undefined): Promise<void> {
     next = nextVersion(last, arg);
   } else {
     next = parseVersion(arg);
-    if (last && compareVersions(next, last) <= 0) throw new Error(`${arg} is not after the last release, ${formatVersion(last)}`);
+    if (last && compareVersions(next, last) <= 0)
+      throw new Error(`${arg} is not after the last release, ${formatVersion(last)}`);
   }
   const version = formatVersion(next);
   const tag = `v${version}`;
@@ -193,7 +217,9 @@ async function prepare(arg: string | undefined): Promise<void> {
     await git("commit", "--quiet", "-m", `Release ${tag}`, "--", ...Object.keys(files));
   } catch (error) {
     await git("checkout", "--", ...Object.keys(files));
-    throw new Error(`${error instanceof Error ? error.message : String(error)}; the version files are back as they were`);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; the version files are back as they were`,
+    );
   }
   try {
     await git("tag", "--annotate", tag, "--message", `omp-coord ${tag}`);
@@ -204,7 +230,9 @@ async function prepare(arg: string | undefined): Promise<void> {
     );
   }
   console.log(`\nCommitted and tagged ${tag} locally. Nothing is pushed.`);
-  console.log("Review with `git show`, then publish with `just release-publish` (pushes main and the tag; CI creates the GitHub release).");
+  console.log(
+    "Review with `git show`, then publish with `just release-publish` (pushes main and the tag; CI creates the GitHub release).",
+  );
   console.log(`To undo before publishing: git tag -d ${tag} && git reset --hard HEAD~1`);
 }
 
@@ -218,7 +246,10 @@ if (import.meta.main) {
       const notes = arg && changelogSection(read(FILES.changelog), arg);
       if (!notes) throw new Error(`${FILES.changelog} has no entry for ${arg ?? "(no version given)"}`);
       console.log(notes);
-    } else throw new Error("usage: release.ts plan | prepare <breaking|feature|fix|X.Y.Z> | verify [vX.Y.Z] | notes <X.Y.Z>");
+    } else
+      throw new Error(
+        "usage: release.ts plan | prepare <breaking|feature|fix|X.Y.Z> | verify [vX.Y.Z] | notes <X.Y.Z>",
+      );
   } catch (error) {
     console.error(`release: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BoardRepository } from "../../app/ports.ts";
-import { type Board, type BoardEvent, type Note, emptyBoard } from "../../domain/model.ts";
+import { type Board, type BoardEvent, emptyBoard, type Note } from "../../domain/model.ts";
 
 /** How long the event log keeps events. */
 export interface Retention {
@@ -194,9 +194,10 @@ export class BoardStore implements BoardRepository {
   /** Events oldest first, optionally only those at or after `since`. */
   events(since = 0): BoardEvent[] {
     return this.#db
-      .query<{ at: number; type: BoardEvent["type"]; session_id: string | null; label: string | null; data: string }, [number]>(
-        "SELECT at, type, session_id, label, data FROM events WHERE at >= ? ORDER BY id",
-      )
+      .query<
+        { at: number; type: BoardEvent["type"]; session_id: string | null; label: string | null; data: string },
+        [number]
+      >("SELECT at, type, session_id, label, data FROM events WHERE at >= ? ORDER BY id")
       .all(since)
       .map(r => ({ at: r.at, type: r.type, sessionId: r.session_id, label: r.label, data: JSON.parse(r.data) }));
   }
@@ -209,7 +210,11 @@ export class BoardStore implements BoardRepository {
       .run(this.#retention.maxEvents);
     // The decision log follows the same age limit.
     this.#db.query("DELETE FROM notes WHERE at < ?").run(now - this.#retention.maxAgeMs);
-    this.#db.query("INSERT INTO meta (key, value) VALUES ('events_pruned_at', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(String(now));
+    this.#db
+      .query(
+        "INSERT INTO meta (key, value) VALUES ('events_pruned_at', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(now));
   }
 
   notes(limit: number): Note[] {
@@ -226,14 +231,18 @@ export class BoardStore implements BoardRepository {
     const version = this.#db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
     if (version === SCHEMA_VERSION) return;
     if (version !== 0) {
-      throw new Error(`the board database has schema ${version}, but this omp-coord reads schema ${SCHEMA_VERSION}; update omp-coord`);
+      throw new Error(
+        `the board database has schema ${version}, but this omp-coord reads schema ${SCHEMA_VERSION}; update omp-coord`,
+      );
     }
     this.#db.exec(SCHEMA);
     this.#db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 
   #maybePruneEvents(now: number): void {
-    const last = Number(this.#db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'events_pruned_at'").get()?.value ?? 0);
+    const last = Number(
+      this.#db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'events_pruned_at'").get()?.value ?? 0,
+    );
     if (now - last >= PRUNE_INTERVAL_MS) this.pruneEvents(now);
   }
 
@@ -243,7 +252,17 @@ export class BoardStore implements BoardRepository {
       ...emptyBoard(),
       sessions: db
         .query<
-          { id: string; label: string; pid: number; cwd: string; socket: string; started_at: number; config_hash: string; ports_from: number | null; ports_to: number | null },
+          {
+            id: string;
+            label: string;
+            pid: number;
+            cwd: string;
+            socket: string;
+            started_at: number;
+            config_hash: string;
+            ports_from: number | null;
+            ports_to: number | null;
+          },
           []
         >("SELECT * FROM sessions")
         .all()
@@ -259,7 +278,15 @@ export class BoardStore implements BoardRepository {
         })),
       slots: db
         .query<
-          { session_id: string; agent_id: string | null; parent_id: string; agent_type: string; pool: string | null; state: "starting" | "running"; since: number },
+          {
+            session_id: string;
+            agent_id: string | null;
+            parent_id: string;
+            agent_type: string;
+            pool: string | null;
+            state: "starting" | "running";
+            since: number;
+          },
           []
         >("SELECT * FROM slots ORDER BY id")
         .all()
@@ -273,13 +300,29 @@ export class BoardStore implements BoardRepository {
           since: r.since,
         })),
       waitlist: db
-        .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>("SELECT * FROM tickets")
+        .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>(
+          "SELECT * FROM tickets",
+        )
         .all()
-        .map(r => ({ sessionId: r.session_id, pool: r.pool, since: r.since, holdUntil: r.hold_until ?? undefined, notified: r.notified === 1 })),
+        .map(r => ({
+          sessionId: r.session_id,
+          pool: r.pool,
+          since: r.since,
+          holdUntil: r.hold_until ?? undefined,
+          notified: r.notified === 1,
+        })),
       messages: db
-        .query<{ from_id: string; to_id: string; to_agent: string | null; text: string; sent_at: number }, []>("SELECT * FROM messages ORDER BY id")
+        .query<{ from_id: string; to_id: string; to_agent: string | null; text: string; sent_at: number }, []>(
+          "SELECT * FROM messages ORDER BY id",
+        )
         .all()
-        .map(r => ({ fromId: r.from_id, toId: r.to_id, toAgent: r.to_agent ?? undefined, text: r.text, sentAt: r.sent_at })),
+        .map(r => ({
+          fromId: r.from_id,
+          toId: r.to_id,
+          toAgent: r.to_agent ?? undefined,
+          text: r.text,
+          sentAt: r.sent_at,
+        })),
       sent: db
         .query<{ session_id: string; at: number }, []>("SELECT * FROM sent")
         .all()
@@ -319,15 +362,36 @@ export class BoardStore implements BoardRepository {
         })),
       served: db.query<{ queue: string; owner: string | null; at: number }, []>("SELECT * FROM queue_served").all(),
       pause: (() => {
-        const r = db.query<{ by_session: string | null; reason: string; since: number }, []>("SELECT * FROM pause").get();
+        const r = db
+          .query<{ by_session: string | null; reason: string; since: number }, []>("SELECT * FROM pause")
+          .get();
         return r ? { by: r.by_session, reason: r.reason, since: r.since } : undefined;
       })(),
       claims: db
-        .query<{ kind: "branch" | "worktree" | "pr"; target: string; session_id: string; agent_id: string; note: string; since: number }, []>("SELECT * FROM claims")
+        .query<
+          {
+            kind: "branch" | "worktree" | "pr";
+            target: string;
+            session_id: string;
+            agent_id: string;
+            note: string;
+            since: number;
+          },
+          []
+        >("SELECT * FROM claims")
         .all()
-        .map(r => ({ kind: r.kind, target: r.target, sessionId: r.session_id, agentId: r.agent_id, note: r.note, since: r.since })),
+        .map(r => ({
+          kind: r.kind,
+          target: r.target,
+          sessionId: r.session_id,
+          agentId: r.agent_id,
+          note: r.note,
+          since: r.since,
+        })),
       agentPorts: db
-        .query<{ session_id: string; agent_id: string; from_port: number; to_port: number }, []>("SELECT * FROM agent_ports")
+        .query<{ session_id: string; agent_id: string; from_port: number; to_port: number }, []>(
+          "SELECT * FROM agent_ports",
+        )
         .all()
         .map(r => ({ sessionId: r.session_id, agentId: r.agent_id, from: r.from_port, to: r.to_port })),
       load: db.query<{ value: number; at: number }, []>("SELECT value, at FROM machine_load").get() ?? undefined,
@@ -346,17 +410,45 @@ export class BoardStore implements BoardRepository {
    */
   #save(board: Board): void {
     const db = this.#db;
-    for (const table of ["sent", "messages", "tickets", "slots", "claims", "agent_ports", "sessions", "jobs", "queue_served", "pause", "machine_load"]) {
+    for (const table of [
+      "sent",
+      "messages",
+      "tickets",
+      "slots",
+      "claims",
+      "agent_ports",
+      "sessions",
+      "jobs",
+      "queue_served",
+      "pause",
+      "machine_load",
+    ]) {
       db.exec(`DELETE FROM ${table}`);
     }
 
     const session = db.query(
       "INSERT INTO sessions (id, label, pid, cwd, socket, started_at, config_hash, ports_from, ports_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
-    for (const s of board.sessions) session.run(s.id, s.label, s.pid, s.cwd, s.socket, s.startedAt, s.configHash, s.ports?.from ?? null, s.ports?.to ?? null);
-    const slot = db.query("INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    for (const s of board.slots) slot.run(s.sessionId, s.agentId ?? null, s.parentId, s.agentType, s.pool, s.state, s.since);
-    const ticket = db.query("INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)");
+    for (const s of board.sessions)
+      session.run(
+        s.id,
+        s.label,
+        s.pid,
+        s.cwd,
+        s.socket,
+        s.startedAt,
+        s.configHash,
+        s.ports?.from ?? null,
+        s.ports?.to ?? null,
+      );
+    const slot = db.query(
+      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const s of board.slots)
+      slot.run(s.sessionId, s.agentId ?? null, s.parentId, s.agentType, s.pool, s.state, s.since);
+    const ticket = db.query(
+      "INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)",
+    );
     for (const t of board.waitlist) ticket.run(t.sessionId, t.pool, t.since, t.holdUntil ?? null, t.notified ? 1 : 0);
     const message = db.query("INSERT INTO messages (from_id, to_id, to_agent, text, sent_at) VALUES (?, ?, ?, ?, ?)");
     for (const m of board.messages) message.run(m.fromId, m.toId, m.toAgent ?? null, m.text, m.sentAt);
@@ -366,16 +458,37 @@ export class BoardStore implements BoardRepository {
       "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const j of board.jobs) {
-      job.run(j.id, j.queue, j.owner, j.lane, j.priority, j.key ?? null, j.command, j.socket, j.pid, j.state, j.since, j.startedAt ?? null);
+      job.run(
+        j.id,
+        j.queue,
+        j.owner,
+        j.lane,
+        j.priority,
+        j.key ?? null,
+        j.command,
+        j.socket,
+        j.pid,
+        j.state,
+        j.since,
+        j.startedAt ?? null,
+      );
     }
     const served = db.query("INSERT INTO queue_served (queue, owner, at) VALUES (?, ?, ?)");
     for (const s of board.served) served.run(s.queue, s.owner, s.at);
-    if (board.pause) db.query("INSERT INTO pause (id, by_session, reason, since) VALUES (1, ?, ?, ?)").run(board.pause.by, board.pause.reason, board.pause.since);
-    const claim = db.query("INSERT INTO claims (kind, target, session_id, agent_id, note, since) VALUES (?, ?, ?, ?, ?, ?)");
+    if (board.pause)
+      db.query("INSERT INTO pause (id, by_session, reason, since) VALUES (1, ?, ?, ?)").run(
+        board.pause.by,
+        board.pause.reason,
+        board.pause.since,
+      );
+    const claim = db.query(
+      "INSERT INTO claims (kind, target, session_id, agent_id, note, since) VALUES (?, ?, ?, ?, ?, ?)",
+    );
     for (const c of board.claims) claim.run(c.kind, c.target, c.sessionId, c.agentId, c.note, c.since);
     const ports = db.query("INSERT INTO agent_ports (session_id, agent_id, from_port, to_port) VALUES (?, ?, ?, ?)");
     for (const p of board.agentPorts) ports.run(p.sessionId, p.agentId, p.from, p.to);
-    if (board.load) db.query("INSERT INTO machine_load (id, value, at) VALUES (1, ?, ?)").run(board.load.value, board.load.at);
+    if (board.load)
+      db.query("INSERT INTO machine_load (id, value, at) VALUES (1, ?, ?)").run(board.load.value, board.load.at);
     const note = db.query("INSERT OR IGNORE INTO notes (id, at, label, author, text) VALUES (?, ?, ?, ?, ?)");
     for (const n of board.notes) note.run(n.id, n.at, n.label, n.author, n.text);
 

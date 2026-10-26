@@ -10,8 +10,10 @@ import { registerSession } from "../src/domain/sessions.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const freshDb = () => join(mkdtempSync(join(tmpdir(), "omp-coord-")), "scope.db");
-const join_ = (id: string, now = 0) => (b: Board) =>
-  registerSession(b, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now });
+const join_ =
+  (id: string, now = 0) =>
+  (b: Board) =>
+    registerSession(b, { id, pid: 1, cwd: "/w", socket: `/s/${id}`, configHash: "h", now });
 
 describe("board store", () => {
   test("sessions changing the board at the same time never lose each other's changes or events", async () => {
@@ -34,7 +36,12 @@ describe("board store", () => {
     expect(await Promise.all(writers.map(w => w.exited))).toEqual([0, 0, 0]);
     const store = new BoardStore(db);
     expect(store.read().sent).toHaveLength(450);
-    expect(store.events().map(e => e.label).sort()).toEqual(["A", "B", "C"]);
+    expect(
+      store
+        .events()
+        .map(e => e.label)
+        .sort(),
+    ).toEqual(["A", "B", "C"]);
   });
 
   test("a change that throws leaves the board and the log as they were", () => {
@@ -53,9 +60,19 @@ describe("board store", () => {
   test("the database refuses a board that breaks its constraints, and nothing is saved", () => {
     const store = new BoardStore(freshDb());
     store.transact(join_("a"));
-    expect(() => store.transact(b => b.slots.push({ sessionId: "ghost", agentId: "X", parentId: "Main", agentType: "task", pool: "work", state: "running", since: 0 }))).toThrow(
-      /FOREIGN KEY/,
-    );
+    expect(() =>
+      store.transact(b =>
+        b.slots.push({
+          sessionId: "ghost",
+          agentId: "X",
+          parentId: "Main",
+          agentType: "task",
+          pool: "work",
+          state: "running",
+          since: 0,
+        }),
+      ),
+    ).toThrow(/FOREIGN KEY/);
     expect(store.read().slots).toEqual([]);
   });
 
@@ -63,12 +80,30 @@ describe("board store", () => {
     const store = new BoardStore(freshDb());
     store.transact(b => {
       join_("a")(b);
-      b.slots.push({ sessionId: "a", agentId: undefined, parentId: "Main", agentType: "task", pool: null, state: "starting", since: 5 });
+      b.slots.push({
+        sessionId: "a",
+        agentId: undefined,
+        parentId: "Main",
+        agentType: "task",
+        pool: null,
+        state: "starting",
+        since: 5,
+      });
       b.waitlist.push({ sessionId: "a", pool: "work", since: 6, holdUntil: undefined, notified: true });
       b.messages.push({ fromId: "gone", toId: "a", toAgent: "Kid", text: "hi", sentAt: 7 });
     });
     const b = store.read();
-    expect(b.slots).toEqual([{ sessionId: "a", agentId: undefined, parentId: "Main", agentType: "task", pool: null, state: "starting", since: 5 }]);
+    expect(b.slots).toEqual([
+      {
+        sessionId: "a",
+        agentId: undefined,
+        parentId: "Main",
+        agentType: "task",
+        pool: null,
+        state: "starting",
+        since: 5,
+      },
+    ]);
     expect(b.waitlist).toEqual([{ sessionId: "a", pool: "work", since: 6, holdUntil: undefined, notified: true }]);
     expect(b.messages).toEqual([{ fromId: "gone", toId: "a", toAgent: "Kid", text: "hi", sentAt: 7 }]);
     expect(b.events).toEqual([]);
@@ -86,7 +121,9 @@ describe("board store", () => {
     });
     const b = store.read();
     expect(b.pause).toEqual({ by: "a", reason: "merging", since: 1 });
-    expect(b.claims).toEqual([{ kind: "branch", target: "fix-x", sessionId: "a", agentId: "Main", note: "n", since: 2 }]);
+    expect(b.claims).toEqual([
+      { kind: "branch", target: "fix-x", sessionId: "a", agentId: "Main", note: "n", since: 2 },
+    ]);
     expect(b.agentPorts).toEqual([{ sessionId: "a", agentId: "X", from: 18700, to: 18709 }]);
     expect(b.load).toEqual({ value: 12.5, at: 3 });
     expect(store.notes(10).map(n => n.text)).toEqual(["ship it"]);
@@ -115,7 +152,9 @@ describe("board store", () => {
 
   test("events about build jobs started outside any omp session are kept with no session", () => {
     const store = new BoardStore(freshDb());
-    store.transact(b => b.events.push({ at: Date.now(), type: "job_queued", sessionId: null, label: null, data: { job: "j1" } }));
+    store.transact(b =>
+      b.events.push({ at: Date.now(), type: "job_queued", sessionId: null, label: null, data: { job: "j1" } }),
+    );
     expect(store.events().map(e => [e.type, e.sessionId])).toEqual([["job_queued", null]]);
   });
 

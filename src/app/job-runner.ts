@@ -5,7 +5,7 @@
  */
 import { pauseReason } from "../domain/control.ts";
 import { observeLoad } from "../domain/limits.ts";
-import { type Queues, dropJobs, enqueueJob, jobEnded, positionOf, schedule, slotsOf } from "../domain/queues.ts";
+import { dropJobs, enqueueJob, jobEnded, positionOf, type Queues, schedule, slotsOf } from "../domain/queues.ts";
 import type { BoardRepository, Clock, Listener, Liveness, LoadProbe } from "./ports.ts";
 
 /** Exit status when the job was not run: refused, or superseded by a newer job with the same key. */
@@ -121,12 +121,15 @@ export async function runJob(spec: JobSpec, queues: Queues, p: RunnerPorts): Pro
       }
       if (mine.position !== said) {
         const why = mine.paused ? ` (${mine.paused})` : "";
-        p.report(`omp-coord: waiting for a ${spec.queue} slot: #${mine.position} in line, ${mine.running}/${mine.slots} running${why} (job ${spec.id})`);
+        p.report(
+          `omp-coord: waiting for a ${spec.queue} slot: #${mine.position} in line, ${mine.running}/${mine.slots} running${why} (job ${spec.id})`,
+        );
         said = mine.position;
       }
       await p.sleep(POLL_MS);
     }
-    if (said !== -1) p.report(`omp-coord: got a ${spec.queue} slot after ${Math.round((p.clock.now() - since) / 1000)} s`);
+    if (said !== -1)
+      p.report(`omp-coord: got a ${spec.queue} slot after ${Math.round((p.clock.now() - since) / 1000)} s`);
 
     const timeoutMs = ownTimeout === undefined ? (queues[spec.queue]?.timeoutMs ?? null) : ownTimeout;
     const { code, timedOut } = await p.execute(timeoutMs);

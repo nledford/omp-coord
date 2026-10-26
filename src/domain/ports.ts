@@ -24,10 +24,16 @@ export function freeBlock(from: number, to: number, size: number, taken: PortRan
 export type AgentPortsResult = { ok: true; ports: PortRange } | { ok: false; reason: string };
 
 /** The agent's block in its session's range, taking a free one the first time. Only for scopes that hand out ports. */
-export function agentPorts(board: Board, a: { sessionId: string; agentId: string; perAgent: number }): AgentPortsResult {
+export function agentPorts(
+  board: Board,
+  a: { sessionId: string; agentId: string; perAgent: number },
+): AgentPortsResult {
   const session = board.sessions.find(s => s.id === a.sessionId);
   if (!session?.ports) {
-    return { ok: false, reason: "this session got no ports when it started: other sessions held every block of resources.ports" };
+    return {
+      ok: false,
+      reason: "this session got no ports when it started: other sessions held every block of resources.ports",
+    };
   }
   const own = board.agentPorts.find(p => p.sessionId === a.sessionId && p.agentId === a.agentId);
   if (own) return { ok: true, ports: { from: own.from, to: own.to } };
@@ -38,7 +44,10 @@ export function agentPorts(board: Board, a: { sessionId: string; agentId: string
     board.agentPorts.filter(p => p.sessionId === a.sessionId),
   );
   if (!block) {
-    return { ok: false, reason: `this session's ports ${session.ports.from}–${session.ports.to} are all given to its agents` };
+    return {
+      ok: false,
+      reason: `this session's ports ${session.ports.from}–${session.ports.to} are all given to its agents`,
+    };
   }
   board.agentPorts.push({ sessionId: a.sessionId, agentId: a.agentId, ...block });
   return { ok: true, ports: block };

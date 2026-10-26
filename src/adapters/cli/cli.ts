@@ -21,9 +21,9 @@ import { parseArgs } from "node:util";
 import { Coordinator } from "../../app/coordinator.ts";
 import { doctor } from "../../app/doctor.ts";
 import { EXIT_TIMED_OUT, runJob } from "../../app/job-runner.ts";
-import { osLoad } from "../os/load.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { MAX_PRIORITY } from "../../domain/queues.ts";
+import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
 import { formatFindings, formatInterrupted, formatNotes, formatStats, formatStatus } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
@@ -48,7 +48,9 @@ async function main(argv: string[]): Promise<number> {
     case "status":
       return withScope(({ config, coordinator }) => print(formatStatus(coordinator.board(), config, "", Date.now())));
     case "stats":
-      return withScope(({ coordinator }) => print(formatStats(coordinator.stats(wholeNumber(rest[0], 7, "days") * DAY))));
+      return withScope(({ coordinator }) =>
+        print(formatStats(coordinator.stats(wholeNumber(rest[0], 7, "days") * DAY))),
+      );
     case "interrupted":
       // A crashed session counts as left only once something drops it; with no session running, nothing else will.
       return withScope(async ({ coordinator }) => {
@@ -191,7 +193,10 @@ async function run(args: string[]): Promise<number> {
 
   return withScope(async ({ config, store, dir }) => {
     const policy = Object.hasOwn(config.queues, queue) ? config.queues[queue] : undefined;
-    if (!policy) throw new UsageError(`omp-coord run: no queue "${queue}" in ${config.source} (${Object.keys(config.queues).join(", ") || "none"})`);
+    if (!policy)
+      throw new UsageError(
+        `omp-coord run: no queue "${queue}" in ${config.source} (${Object.keys(config.queues).join(", ") || "none"})`,
+      );
     if (values.lane !== undefined && !policy.lanes.includes(values.lane)) {
       throw new UsageError(`omp-coord run: no lane "${values.lane}" in queue ${queue} (${policy.lanes.join(", ")})`);
     }
@@ -222,7 +227,10 @@ async function run(args: string[]): Promise<number> {
         stopRequested: () => (stopping ? 128 + signalNumber(stopping) : undefined),
         report: line => console.error(line),
         execute: limit =>
-          spawnCommand(command, commandEnv({ OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }), limit, { ownGroup: true, onStart: attach }),
+          spawnCommand(command, commandEnv({ OMP_COORD_JOB: id, OMP_COORD_QUEUE: queue }), limit, {
+            ownGroup: true,
+            onStart: attach,
+          }),
       },
     );
   });
@@ -290,7 +298,10 @@ async function spawnCommand(
     while (signal(0) && Date.now() - termAt < KILL_GRACE_MS) await Bun.sleep(100);
     signal("SIGKILL");
   }
-  return { code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode, timedOut: termAt !== undefined };
+  return {
+    code: child.signalCode ? 128 + signalNumber(child.signalCode as NodeJS.Signals) : exitCode,
+    timedOut: termAt !== undefined,
+  };
 }
 
 function signalNumber(signal: NodeJS.Signals): number {

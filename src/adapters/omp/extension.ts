@@ -110,7 +110,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       return { block: true, reason: `omp-coord: ${decision.reason}` };
     } catch (error) {
       // The cap is a shared agreement, not a security boundary: a broken board must not stop all work.
-      notify(rt, `omp-coord could not check the agent cap, so ${event.agent} starts unchecked: ${describe(error)}`, "error");
+      notify(
+        rt,
+        `omp-coord could not check the agent cap, so ${event.agent} starts unchecked: ${describe(error)}`,
+        "error",
+      );
       return undefined;
     }
   });
@@ -128,7 +132,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
         agentType: ctx.agent.name.toLowerCase(),
       });
       if (count && count.used > count.cap) {
-        notify(rt, `omp-coord: ${ctx.agent.id} runs over the ${count.pool} cap (${count.used}/${count.cap}); nothing new starts until the total is under it`, "warning");
+        notify(
+          rt,
+          `omp-coord: ${ctx.agent.id} runs over the ${count.pool} cap (${count.used}/${count.cap}); nothing new starts until the total is under it`,
+          "warning",
+        );
       }
     });
   });
@@ -136,7 +144,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
   pi.on("agent_end", (_event, ctx) => {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
-    guarded(rt, "free an agent slot", () => rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id }));
+    guarded(rt, "free an agent slot", () =>
+      rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id }),
+    );
   });
 
   pi.on("tool_call", (event, ctx) => {
@@ -166,7 +176,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
     }
 
-    const decision = decideCommand(rt.config.commands, command, { ...RUNNER, owner: rt.sessionId, config: rt.config.source });
+    const decision = decideCommand(rt.config.commands, command, {
+      ...RUNNER,
+      owner: rt.sessionId,
+      config: rt.config.source,
+    });
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
     if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
     return undefined;
@@ -202,7 +216,8 @@ export default function ompCoord(pi: ExtensionAPI): void {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const rt = shared.runtime;
       if (!rt) return inactive();
-      if (ctx.agent.kind !== "main") return text("Only the main session messages other sessions; report to your parent instead.", true);
+      if (ctx.agent.kind !== "main")
+        return text("Only the main session messages other sessions; report to your parent instead.", true);
       return sendFrom(rt, params.to, params.text);
     },
   });
@@ -224,7 +239,14 @@ export default function ompCoord(pi: ExtensionAPI): void {
       if (!rt) return inactive();
       const kind = claimKind(params.kind);
       if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
-      const r = rt.coordinator.claim({ sessionId: rt.sessionId, agentId: ctx.agent.id, kind, target: params.target, note: params.note ?? "", cwd: ctx.cwd });
+      const r = rt.coordinator.claim({
+        sessionId: rt.sessionId,
+        agentId: ctx.agent.id,
+        kind,
+        target: params.target,
+        note: params.note ?? "",
+        cwd: ctx.cwd,
+      });
       return r.ok ? text(`Claimed ${kind} ${params.target}.`) : text(`Not claimed: ${r.reason}.`, true);
     },
   });
@@ -253,7 +275,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
     description:
       "Adds a short entry to the decision log every session sees: a decision the user made, with who and when, or a fact " +
       "all sessions must keep to. Not for progress reports or messages to one session (use coord_send).",
-    parameters: pi.zod.object({ text: pi.zod.string().describe("The decision, e.g. 'User, 14:05: ship #2913 before #2914'") }),
+    parameters: pi.zod.object({
+      text: pi.zod.string().describe("The decision, e.g. 'User, 14:05: ship #2913 before #2914'"),
+    }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const rt = shared.runtime;
       if (!rt) return inactive();
@@ -279,7 +303,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
       }
       const scratch = scratchFor(rt, ctx.agent.id);
       if (scratch) lines.push(`Scratch folder: ${scratch}`);
-      return lines.length ? text(lines.join("\n")) : text("This scope hands out no ports or scratch folders (resources in .omp-coord.json).", true);
+      return lines.length
+        ? text(lines.join("\n"))
+        : text("This scope hands out no ports or scratch folders (resources in .omp-coord.json).", true);
     },
   });
 
@@ -300,7 +326,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
       const priority = Number(params.priority);
       if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
       const result = rt.coordinator.setJobPriority(rt.sessionId, params.job, priority);
-      return result.ok ? text(`Job ${params.job} now has priority ${priority}.`) : text(`Not changed: ${result.reason}.`, true);
+      return result.ok
+        ? text(`Job ${params.job} now has priority ${priority}.`)
+        : text(`Not changed: ${result.reason}.`, true);
     },
   });
 
@@ -323,23 +351,45 @@ export default function ompCoord(pi: ExtensionAPI): void {
             return ctx.ui.notify(statusText(rt), "info");
           case "send": {
             const m = /^(\S+)\s+([\s\S]+)$/.exec(tail);
-            return say(m ? sendFrom(rt, m[1] as string, m[2] as string) : text("usage: /coord send <letter|B/agent|all> <text>", true));
+            return say(
+              m
+                ? sendFrom(rt, m[1] as string, m[2] as string)
+                : text("usage: /coord send <letter|B/agent|all> <text>", true),
+            );
           }
           case "pause":
             rt.coordinator.pause(rt.sessionId, tail);
-            return ctx.ui.notify("Paused: no new agent or queued job starts in any session until /coord resume.", "warning");
+            return ctx.ui.notify(
+              "Paused: no new agent or queued job starts in any session until /coord resume.",
+              "warning",
+            );
           case "resume":
             return ctx.ui.notify(rt.coordinator.resume(rt.sessionId) ? "Resumed." : "Was not paused.", "info");
           case "claim":
           case "release": {
             const kind = claimKind(rest[0] ?? "");
             const target = rest[1];
-            if (!kind || !target) return say(text(`usage: /coord ${sub} <${CLAIM_KINDS.join("|")}> <target>${sub === "claim" ? " [note]" : ""}`, true));
+            if (!kind || !target)
+              return say(
+                text(
+                  `usage: /coord ${sub} <${CLAIM_KINDS.join("|")}> <target>${sub === "claim" ? " [note]" : ""}`,
+                  true,
+                ),
+              );
             const r =
               sub === "claim"
-                ? rt.coordinator.claim({ sessionId: rt.sessionId, agentId: "Main", kind, target, note: rest.slice(2).join(" "), cwd: ctx.cwd })
+                ? rt.coordinator.claim({
+                    sessionId: rt.sessionId,
+                    agentId: "Main",
+                    kind,
+                    target,
+                    note: rest.slice(2).join(" "),
+                    cwd: ctx.cwd,
+                  })
                 : rt.coordinator.release({ sessionId: rt.sessionId, kind, target, cwd: ctx.cwd });
-            return say(r.ok ? text(`${sub === "claim" ? "Claimed" : "Released"} ${kind} ${target}.`) : text(r.reason, true));
+            return say(
+              r.ok ? text(`${sub === "claim" ? "Claimed" : "Released"} ${kind} ${target}.`) : text(r.reason, true),
+            );
           }
           case "note": {
             const r = rt.coordinator.note(rt.sessionId, "user", tail);
@@ -400,20 +450,33 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   notify(
     rt,
     `omp-coord: this is session ${rt.label} (scope ${config.scope}). ` +
-      (others.length ? `Other sessions: ${others.map(s => `${s.label} (${s.cwd})`).join(", ")}. Agent caps are shared with them.` : "No other session is active.") +
+      (others.length
+        ? `Other sessions: ${others.map(s => `${s.label} (${s.cwd})`).join(", ")}. Agent caps are shared with them.`
+        : "No other session is active.") +
       pausedNote,
     "info",
   );
   if (differing.length) {
-    notify(rt, `omp-coord: sessions ${differing.join(", ")} read a different .omp-coord.json than ${config.source}; their caps and rules differ from this session's.`, "warning");
+    notify(
+      rt,
+      `omp-coord: sessions ${differing.join(", ")} read a different .omp-coord.json than ${config.source}; their caps and rules differ from this session's.`,
+      "warning",
+    );
   }
   if (config.resources.ports && !me?.ports) {
-    notify(rt, "omp-coord: every block of resources.ports is held by other sessions, so this session and its agents get no ports.", "warning");
+    notify(
+      rt,
+      "omp-coord: every block of resources.ports is held by other sessions, so this session and its agents get no ports.",
+      "warning",
+    );
   }
 }
 
 /** Opens the scope's board, starts this session's liveness socket and registers it; undoes both on failure. */
-function openSession(config: Config, cwd: string): Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label"> {
+function openSession(
+  config: Config,
+  cwd: string,
+): Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label"> {
   const dir = stateDir();
   mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
   const store = new BoardStore(join(dir, `${config.scope}.db`), config.history);
@@ -514,7 +577,10 @@ function statusText(rt: Runtime): string {
 }
 
 function deliver(binding: ExtensionAPI, content: string): void {
-  binding.sendMessage({ customType: MESSAGE_TYPE, content, display: true, attribution: "agent" }, { deliverAs: "aside", triggerTurn: true });
+  binding.sendMessage(
+    { customType: MESSAGE_TYPE, content, display: true, attribution: "agent" },
+    { deliverAs: "aside", triggerTurn: true },
+  );
 }
 
 function notify(rt: Runtime, message: string, type: "info" | "warning" | "error"): void {
@@ -545,7 +611,9 @@ function guarded(rt: Runtime, what: string, fn: () => void): void {
 }
 
 function text(body: string, isError = false): ToolResult {
-  return isError ? { content: [{ type: "text", text: body }], isError: true } : { content: [{ type: "text", text: body }] };
+  return isError
+    ? { content: [{ type: "text", text: body }], isError: true }
+    : { content: [{ type: "text", text: body }] };
 }
 
 function describe(error: unknown): string {

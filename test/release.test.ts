@@ -28,17 +28,25 @@ describe("next version", () => {
 
 describe("versions and tags", () => {
   test("ordering is numeric per field, not textual", () => {
-    const sorted = ["1.0.0", "0.10.0", "0.9.12", "0.9.2", "2.0.0"].map(parseVersion).sort(compareVersions).map(formatVersion);
+    const sorted = ["1.0.0", "0.10.0", "0.9.12", "0.9.2", "2.0.0"]
+      .map(parseVersion)
+      .sort(compareVersions)
+      .map(formatVersion);
     expect(sorted).toEqual(["0.9.2", "0.9.12", "0.10.0", "1.0.0", "2.0.0"]);
   });
 
   test("the last release is the highest vX.Y.Z tag, not the newest or the last listed; other tags are ignored", () => {
-    expect(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "v0.11.0-rc.1"])).toEqual({ major: 0, minor: 10, patch: 0 });
+    expect(latestRelease(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0", "v0.11.0-rc.1"])).toEqual({
+      major: 0,
+      minor: 10,
+      patch: 0,
+    });
     expect(latestRelease(["nightly"])).toBeUndefined();
   });
 
   test("malformed versions and prereleases are rejected", () => {
-    for (const bad of ["v1.2.3", "1.2", "01.2.3", "1.2.3-", "1.2.3-rc.1"]) expect(() => parseVersion(bad)).toThrow(/not a release version/);
+    for (const bad of ["v1.2.3", "1.2", "01.2.3", "1.2.3-", "1.2.3-rc.1"])
+      expect(() => parseVersion(bad)).toThrow(/not a release version/);
   });
 });
 
@@ -67,7 +75,9 @@ describe("changelog", () => {
     expect(changelogSection(cut, "0.1.1")).toBe("### Fixed\n\n- Pause keeps held slots.");
     expect(changelogSection(cut, "0.1.0")).toBe("- First release.");
     expect(cut).toContain("## [0.1.1] - 2026-11-02");
-    expect(cut).toContain("[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.1.1...HEAD\n[0.1.1]: https://github.com/nledford/omp-coord/compare/v0.1.0...v0.1.1\n[0.1.0]:");
+    expect(cut).toContain(
+      "[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.1.1...HEAD\n[0.1.1]: https://github.com/nledford/omp-coord/compare/v0.1.0...v0.1.1\n[0.1.0]:",
+    );
   });
 
   test("the first release links to its tag", () => {
@@ -102,13 +112,17 @@ describe("changelog", () => {
     ].join("\r\n");
     const cut = cutChangelog(tricky, "0.1.1", "2026-11-02", "0.1.0");
     expect(cut).not.toContain("\r");
-    expect(cut).toContain("Add entries under `## [Unreleased]` as they land.\n\n## [Unreleased]\n\n## [0.1.1] - 2026-11-02\n");
+    expect(cut).toContain(
+      "Add entries under `## [Unreleased]` as they land.\n\n## [Unreleased]\n\n## [0.1.1] - 2026-11-02\n",
+    );
     expect(changelogSection(cut, "0.1.1")).toBe("- Faster [queues][q].\n\n[q]: docs/queues.md");
   });
 });
 
 test("the version in a JSON file changes in place, and only when it occurs exactly once", () => {
   const pkg = '{\n  "name": "x",\n  "version": "0.1.0",\n  "deps": { "y": "0.1.0" }\n}\n';
-  expect(setJsonVersion(pkg, "0.1.0", "0.2.0")).toBe('{\n  "name": "x",\n  "version": "0.2.0",\n  "deps": { "y": "0.1.0" }\n}\n');
+  expect(setJsonVersion(pkg, "0.1.0", "0.2.0")).toBe(
+    '{\n  "name": "x",\n  "version": "0.2.0",\n  "deps": { "y": "0.1.0" }\n}\n',
+  );
   expect(() => setJsonVersion(pkg, "9.9.9", "1.0.0")).toThrow(/found 0/);
 });

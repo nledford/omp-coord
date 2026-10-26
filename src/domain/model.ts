@@ -211,8 +211,20 @@ export function emptyBoard(): Board {
 }
 
 /** Appends an event to the board's log. For transitions in the domain modules only. */
-export function emit(board: Board, at: number, type: BoardEvent["type"], sessionId: string | null, data: Record<string, unknown> = {}): void {
-  board.events.push({ at, type, sessionId, label: sessionId === null ? null : (labelOf(board, sessionId) ?? null), data });
+export function emit(
+  board: Board,
+  at: number,
+  type: BoardEvent["type"],
+  sessionId: string | null,
+  data: Record<string, unknown> = {},
+): void {
+  board.events.push({
+    at,
+    type,
+    sessionId,
+    label: sessionId === null ? null : (labelOf(board, sessionId) ?? null),
+    data,
+  });
 }
 
 export function labelOf(board: Board, sessionId: string): string | undefined {

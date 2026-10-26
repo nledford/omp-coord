@@ -14,7 +14,10 @@ describe("config", () => {
 
   test("agent types match omp's lowercased names whatever case the file uses", () => {
     const c = parseConfig(
-      { scope: "p", agents: { pools: { work: { cap: 8 }, short: { cap: 2, agentTypes: ["Scout"] } }, exempt: ["Reviewer"] } },
+      {
+        scope: "p",
+        agents: { pools: { work: { cap: 8 }, short: { cap: 2, agentTypes: ["Scout"] } }, exempt: ["Reviewer"] },
+      },
       "f",
     );
     expect(c.agents.pools.short?.agentTypes).toEqual(["scout"]);
@@ -35,14 +38,19 @@ describe("config", () => {
     expect(() => parseConfig({ scope: "p", agents: { pools: { work: { cap: 0 } } } }, "f")).toThrow(
       new ConfigError("f: agents.pools.work.cap must be a whole number of at least 1"),
     );
-    expect(() => parseConfig({ scope: "p", commands: [{ pattern: "(", action: "refuse", reason: "r" }] }, "f")).toThrow(/commands\[0\]\.pattern/);
+    expect(() => parseConfig({ scope: "p", commands: [{ pattern: "(", action: "refuse", reason: "r" }] }, "f")).toThrow(
+      /commands\[0\]\.pattern/,
+    );
   });
 
   test("an agent type may belong to only one pool, and not also be exempt", () => {
     const pools = { work: { cap: 8, agentTypes: ["scout"] }, short: { cap: 2, agentTypes: ["scout"] } };
     expect(() => parseConfig({ scope: "p", agents: { pools } }, "f")).toThrow(/"scout"/);
     expect(() =>
-      parseConfig({ scope: "p", agents: { pools: { short: { cap: 2, agentTypes: ["scout"] } }, exempt: ["scout"] } }, "f"),
+      parseConfig(
+        { scope: "p", agents: { pools: { short: { cap: 2, agentTypes: ["scout"] } }, exempt: ["scout"] } },
+        "f",
+      ),
     ).toThrow(/agents\.exempt/);
   });
 
@@ -52,8 +60,18 @@ describe("config", () => {
 
   test("queues default to FIFO in one lane, refusing duplicates", () => {
     const c = parseConfig({ scope: "p", queues: { heavy: { slots: 2 } } }, "f");
-    expect(c.queues.heavy).toEqual({ slots: 2, order: "fifo", lanes: ["normal"], agingMs: null, onDuplicate: "refuse", timeoutMs: null, loadSlots: [] });
-    expect(() => parseConfig({ scope: "p", queues: { heavy: { slots: 2, order: "lifo" } } }, "f")).toThrow(/queues\.heavy\.order/);
+    expect(c.queues.heavy).toEqual({
+      slots: 2,
+      order: "fifo",
+      lanes: ["normal"],
+      agingMs: null,
+      onDuplicate: "refuse",
+      timeoutMs: null,
+      loadSlots: [],
+    });
+    expect(() => parseConfig({ scope: "p", queues: { heavy: { slots: 2, order: "lifo" } } }, "f")).toThrow(
+      /queues\.heavy\.order/,
+    );
   });
 
   test("load limits, time limits and resources are read, with ports checked for sense", () => {
@@ -68,18 +86,26 @@ describe("config", () => {
     );
     expect(c.agents.pools.work?.loadCaps).toEqual([{ above: 150, limit: 4 }]);
     expect(c.queues.heavy).toMatchObject({ timeoutMs: 120 * 60_000, loadSlots: [{ above: 150, limit: 0 }] });
-    expect(c.resources).toEqual({ ports: { from: 18700, to: 18999, perSession: 100, perAgent: 10 }, scratch: "/cfg/scratch" });
-    expect(() => parseConfig({ scope: "p", resources: { ports: { from: 19000, to: 18000, perSession: 10 } } }, "f")).toThrow(/resources\.ports/);
+    expect(c.resources).toEqual({
+      ports: { from: 18700, to: 18999, perSession: 100, perAgent: 10 },
+      scratch: "/cfg/scratch",
+    });
+    expect(() =>
+      parseConfig({ scope: "p", resources: { ports: { from: 19000, to: 18000, perSession: 10 } } }, "f"),
+    ).toThrow(/resources\.ports/);
   });
 
   test("a command rule must name a queue and lane that exist", () => {
     const queues = { test: { slots: 3, lanes: ["front", "normal"] } };
-    expect(() => parseConfig({ scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "heavy" }] }, "f")).toThrow(
-      /commands\[0\]\.queue/,
-    );
-    expect(() => parseConfig({ scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "test", lane: "vip" }] }, "f")).toThrow(
-      /commands\[0\]\.lane/,
-    );
+    expect(() =>
+      parseConfig({ scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "heavy" }] }, "f"),
+    ).toThrow(/commands\[0\]\.queue/);
+    expect(() =>
+      parseConfig(
+        { scope: "p", queues, commands: [{ pattern: "x", action: "queue", queue: "test", lane: "vip" }] },
+        "f",
+      ),
+    ).toThrow(/commands\[0\]\.lane/);
   });
 
   test("a worktree below the checkout finds the checkout's file; the environment variable wins", () => {

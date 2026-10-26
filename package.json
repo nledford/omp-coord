@@ -5,13 +5,26 @@
   "description": "omp extension and CLI: shared subagent caps, build and test queues, claims and messages across omp sessions on one machine",
   "license": "MIT",
   "author": "Nathaniel Ledford",
-  "repository": { "type": "git", "url": "https://github.com/nledford/omp-coord.git" },
-  "keywords": ["omp", "omp-plugin", "oh-my-pi", "agents", "coordination"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nledford/omp-coord.git"
+  },
+  "keywords": [
+    "omp",
+    "omp-plugin",
+    "oh-my-pi",
+    "agents",
+    "coordination"
+  ],
   "type": "module",
   "main": "src/index.ts",
-  "bin": { "omp-coord": "src/adapters/cli/cli.ts" },
+  "bin": {
+    "omp-coord": "src/adapters/cli/cli.ts"
+  },
   "omp": {
-    "extensions": ["src/index.ts"]
+    "extensions": [
+      "src/index.ts"
+    ]
   },
   "packageManager": "bun@1.4.4",
   "scripts": {
@@ -20,6 +33,7 @@
     "check": "bun run typecheck && bun test && bun scripts/release.ts verify"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.3",
     "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
   }

@@ -1,23 +1,35 @@
 import { describe, expect, test } from "bun:test";
 import { type Board, emptyBoard } from "../src/domain/model.ts";
-import { registerSession, removeSession } from "../src/domain/sessions.ts";
 import {
-  type QueuePolicy,
   dropJobs,
   enqueueJob,
   jobEnded,
   orderWaiting,
   positionOf,
+  type QueuePolicy,
   setJobPriority,
 } from "../src/domain/queues.ts";
+import { registerSession, removeSession } from "../src/domain/sessions.ts";
 
 const MIN = 60_000;
 
-const base: QueuePolicy = { slots: 1, order: "fifo", lanes: ["front", "normal"], agingMs: null, onDuplicate: "refuse", timeoutMs: null, loadSlots: [] };
+const base: QueuePolicy = {
+  slots: 1,
+  order: "fifo",
+  lanes: ["front", "normal"],
+  agingMs: null,
+  onDuplicate: "refuse",
+  timeoutMs: null,
+  loadSlots: [],
+};
 const queues = (p: Partial<QueuePolicy> = {}) => ({ heavy: { ...base, ...p } });
 
 let next = 0;
-function enqueue(board: Board, q: ReturnType<typeof queues>, j: { owner?: string | null; lane?: string; priority?: number; key?: string; now?: number }) {
+function enqueue(
+  board: Board,
+  q: ReturnType<typeof queues>,
+  j: { owner?: string | null; lane?: string; priority?: number; key?: string; now?: number },
+) {
   const id = `j${++next}`;
   const r = enqueueJob(board, q, {
     id,
@@ -77,7 +89,18 @@ describe("lanes", () => {
   test("an unknown lane or queue is refused", () => {
     const board = emptyBoard();
     expect(enqueue(board, queues(), { lane: "vip" })).toMatchObject({ ok: false });
-    expect(enqueueJob(board, queues(), { id: "x", queue: "nope", owner: "a", priority: 0, command: "c", socket: "/s", pid: 1, now: 0 })).toMatchObject({ ok: false });
+    expect(
+      enqueueJob(board, queues(), {
+        id: "x",
+        queue: "nope",
+        owner: "a",
+        priority: 0,
+        command: "c",
+        socket: "/s",
+        pid: 1,
+        now: 0,
+      }),
+    ).toMatchObject({ ok: false });
   });
 });
 
@@ -86,9 +109,15 @@ describe("duplicate jobs", () => {
     const board = emptyBoard();
     const q = queues();
     enqueue(board, q, { key: "/w/one ci" });
-    expect(enqueue(board, q, { key: "/w/one ci" })).toMatchObject({ ok: false, reason: expect.stringMatching(/already running/) });
+    expect(enqueue(board, q, { key: "/w/one ci" })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/already running/),
+    });
     enqueue(board, q, { key: "/w/two ci" });
-    expect(enqueue(board, q, { key: "/w/two ci" })).toMatchObject({ ok: false, reason: expect.stringMatching(/already in line/) });
+    expect(enqueue(board, q, { key: "/w/two ci" })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/already in line/),
+    });
   });
 
   test("with supersede, a new job replaces the waiting one with the same key and keeps its place", () => {
@@ -183,7 +212,20 @@ describe("fair-share history", () => {
     const a = enqueue(board, queues({ order: "fair-share" }), { owner: "s" });
     jobEnded(board, queues({ order: "fair-share" }), { id: a.id, exitCode: 0, now: 1 });
     expect(board.served).toHaveLength(1);
-    removeSession(board, { pools: {}, defaultPool: "work", exempt: [], nested: { allow: [], maxRunningPerParent: 1 }, holdMs: 1, startTimeoutMs: 1, messagesPerMinute: 1 }, "s", 2);
+    removeSession(
+      board,
+      {
+        pools: {},
+        defaultPool: "work",
+        exempt: [],
+        nested: { allow: [], maxRunningPerParent: 1 },
+        holdMs: 1,
+        startTimeoutMs: 1,
+        messagesPerMinute: 1,
+      },
+      "s",
+      2,
+    );
     expect(board.served).toEqual([]);
   });
 });
