@@ -13,7 +13,7 @@
   "author": "Nathaniel Ledford",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nledford/omp-coord.git"
+    "url": "git+https://github.com/nledford/omp-coord.git"
   },
   "keywords": [
     "omp",
