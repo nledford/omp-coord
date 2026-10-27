@@ -74,17 +74,17 @@ interface Shared {
   inactive: string;
   /** Each subagent's binding, by agent id: a message for that subagent is sent through it. */
   bindings: Map<string, ExtensionAPI>;
-  /** Counts main-session shutdowns, so a `start` that awaited across one gives up instead of joining the board. */
-  shutdowns: number;
+  /** Main-session bindings that shut down, so a `start` for one that awaited across its own shutdown gives up. */
+  shutDown: WeakSet<ExtensionAPI>;
 }
 
 /** Shared by every copy of this module in the process (omp re-imports extensions for isolated subagents). */
 const shared: Shared = (() => {
   const store = globalThis as { [key: symbol]: Shared | undefined };
   const key = Symbol.for("omp-coord.runtime");
-  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map(), shutdowns: 0 };
-  // a copy made by an older version of this module in the same process has no counter yet
-  store[key].shutdowns ??= 0;
+  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map(), shutDown: new WeakSet() };
+  // a copy made by an older version of this module in the same process has no set yet
+  store[key].shutDown ??= new WeakSet();
   return store[key];
 })();
 
@@ -109,7 +109,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
       if (shared.bindings.get(ctx.agent.id) === pi) shared.bindings.delete(ctx.agent.id);
       return;
     }
-    shared.shutdowns++;
+    shared.shutDown.add(pi);
     if (shared.runtime?.pi === pi) stop(shared.runtime);
   });
 
@@ -461,10 +461,9 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   let queue: SpawnQueue | undefined;
   let queueNote = "Spawns past the cap are refused (agents.queueSpawns is off).";
   if (config.agents.queueSpawns) {
-    const shutdownsBefore = shared.shutdowns;
     const handle = await loadSettingHandle();
-    // the session ended (switched or reloaded) while the handle loaded: don't join the board for it
-    if (shared.shutdowns !== shutdownsBefore) return;
+    // this session ended (switched or reloaded) while the handle loaded: don't join the board for it
+    if (shared.shutDown.has(pi)) return;
     const scope = pi.pi?.settings;
     queue = typeof handle === "string" ? undefined : spawnQueue(handle, scope);
     queueNote = queue
@@ -651,7 +650,7 @@ function statusText(rt: Runtime): string {
     ? rt.queueNote
     : spawnAllowance(board, rt.config.agents, rt.sessionId, Date.now()) !== undefined
       ? "Spawns past the cap wait in omp's queue and start as slots free (this is the only session)."
-      : `Spawns past the cap are refused and this session holds a place in line (${board.pause ? "the scope is paused" : board.sessions.length > 1 ? "other sessions are in the scope" : "every slot is taken by agents outside omp's queue"}).`;
+      : `Spawns over the cap are refused and put this session in line (${board.pause ? "the scope is paused" : board.sessions.length > 1 ? "other sessions are in the scope" : board.slots.some(x => x.sessionId === rt.sessionId && x.unqueued === "eval") ? "a workpool's workers are running" : "no slot is free for a new spawn"}).`;
   return `${formatStatus(board, rt.config, rt.sessionId, Date.now())}\n${queueLine}`;
 }
 

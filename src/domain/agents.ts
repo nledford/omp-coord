@@ -125,7 +125,7 @@ function addStartingSlot(board: Board, req: SpawnRequest, pool: string | null): 
     pool,
     state: "starting",
     since: req.now,
-    ...(req.invocationKind === "eval" ? { unqueued: true as const } : {}),
+    ...(req.invocationKind === "eval" ? { unqueued: "eval" as const } : {}),
   });
   emit(board, req.now, "spawn_approved", req.sessionId, {
     agentType: req.agentType,
@@ -188,7 +188,7 @@ export function agentStarted(
       pool: a.parentIsSubagent ? null : poolFor(policy, a.agentType),
       state: "running",
       since: a.now,
-      unqueued: true,
+      unqueued: "revived",
     };
     board.slots.push(slot);
   }
@@ -273,7 +273,7 @@ function listOr(items: string[]): string {
  * How many of this session's own (main-agent) spawns may run at once right now, for omp's per-session spawn queue
  * (`task.maxConcurrency`), or `undefined` when the queue must not be driven and spawns are left to the spawn check.
  *
- * Driven only while this session is alone in the scope and not paused. omp re-reads its queue size only when this
+ * Driven only while this session is alone in the scope, not paused, and runs no eval workpool workers. omp re-reads its queue size only when this
  * session asks for a spawn or one of its runs ends, and a spawn parked in that queue never reaches the spawn check, so
  * it never joins the line: with other sessions, a slot one of them frees could not be held for this session fairly.
  * There the refusal and the line decide, as they always did.
@@ -286,6 +286,9 @@ function listOr(items: string[]): string {
  */
 export function spawnAllowance(board: Board, policy: AgentPolicy, sessionId: string, now: number): number | undefined {
   if (board.pause || board.sessions.some(s => s.id !== sessionId)) return undefined;
+  // an eval workpool sizes itself from the same setting while its own workers take slots: one number can't size
+  // both queues, so while workers run the spawn check decides
+  if (board.slots.some(s => s.sessionId === sessionId && s.unqueued === "eval")) return undefined;
   const pool = policy.defaultPool;
   const queued = board.slots.filter(s => s.sessionId === sessionId && s.parentId === "Main" && !s.unqueued).length;
   const held = board.waitlist.filter(

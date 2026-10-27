@@ -485,8 +485,10 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
     expect(allowance(board, "a")).toBe(1);
   });
 
-  test("a workpool worker (an eval spawn) takes a slot but no place in omp's queue, so it isn't counted", () => {
+  test("while a workpool worker (an eval spawn) runs, the queue isn't driven: the workpool sizes itself from it too", () => {
     const board = boardWith("a");
+    run(board, "a", "A1");
+    expect(allowance(board, "a")).toBe(2);
     requestSpawn(board, policy, {
       sessionId: "a",
       parentAgentId: "Main",
@@ -496,8 +498,9 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
       invocationKind: "eval",
       now: 0,
     });
-    run(board, "a", "A1");
-    expect(allowance(board, "a")).toBe(1);
+    expect(allowance(board, "a")).toBeUndefined();
+    agentEnded(board, policy, { sessionId: "a", agentId: "W1", now: 1 });
+    expect(allowance(board, "a", 1)).toBe(2);
   });
 
   test("with every slot taken by agents outside omp's queue it isn't driven, rather than let spawns through one by one", () => {

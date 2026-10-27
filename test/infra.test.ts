@@ -168,10 +168,15 @@ describe("board store", () => {
     };
     store.transact(b => {
       join_("a")(b);
-      b.slots.push({ ...slot, agentId: "Old", unqueued: true }, { ...slot, agentId: "New" });
+      b.slots.push(
+        { ...slot, agentId: "Old", unqueued: "revived" },
+        { ...slot, agentId: "W", unqueued: "eval" },
+        { ...slot, agentId: "New" },
+      );
     });
     expect(store.read().slots.map(s => [s.agentId, s.unqueued])).toEqual([
-      ["Old", true],
+      ["Old", "revived"],
+      ["W", "eval"],
       ["New", undefined],
     ]);
   });

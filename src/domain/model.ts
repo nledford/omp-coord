@@ -101,7 +101,7 @@ export interface AgentSlot {
    * approved (revived with `write agent://…`, or running when this session joined), or a workpool worker (omp starts
    * those outside the queue, as spawns of `invocationKind` "eval").
    */
-  unqueued?: true;
+  unqueued?: "revived" | "eval";
 }
 
 /** A session's place in line for a pool, after a refused spawn. */
