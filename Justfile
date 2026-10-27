@@ -87,7 +87,8 @@ release-publish:
     [ -z "$(git status --porcelain)" ] || { echo "the work tree has uncommitted changes" >&2; exit 1; }
     tag="v$(bun -e 'console.log(require("{{ root }}/package.json").version)')"
     ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "$tag is tagged already: nothing to publish (run \`just release <change>\` for a new one)" >&2; exit 1; }
-    git log --format=%s -n 50 origin/main | grep -qx "Release $tag" || { echo "main holds no \"Release $tag\" commit: merge the release PR first" >&2; exit 1; }
+    # grep reads all of git log's output (no -q): under pipefail, an early exit would kill git log and read as "absent"
+    git log --format=%s -n 50 origin/main | grep -x "Release $tag" >/dev/null || { echo "main holds no \"Release $tag\" commit: merge the release PR first" >&2; exit 1; }
     bun '{{ root }}/scripts/release.ts' verify "$tag"
     git tag --annotate "$tag" --message "omp-coord $tag"
     git push origin "refs/tags/$tag"
