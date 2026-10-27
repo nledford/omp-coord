@@ -12,7 +12,7 @@
 | `agents.nested.maxRunningPerParent` | `1` | How many of those one subagent may run at once. |
 | `agents.holdMinutes` | `5` | How long a freed slot stays held for the session first in line. |
 | `agents.startTimeoutSeconds` | `120` | How long an approved spawn may take to start before its slot frees. |
-| `agents.queueSpawns` | `true` | Keep omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow this session, so spawns past the cap wait and start by themselves instead of being refused ([agent slots](agent-slots.md#spawns-wait-their-turn)). A `task.maxConcurrency` you set yourself stays the ceiling. |
+| `agents.queueSpawns` | `true` | While the session is the only one in the scope, keep omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow it, so spawns past the cap wait and start by themselves instead of being refused ([agent slots](agent-slots.md#spawns-wait-their-turn)); with other sessions, or paused, spawns over the cap are refused as before. A `task.maxConcurrency` you set yourself stays the ceiling. `false` keeps the refusals always. |
 | `messages.perMinute` | `10` | Messages one session may send per minute. It slows two sessions that keep answering each other; it does not stop them. Each delivered message starts a turn in an idle session. |
 | `commands` | `[]` | Rules for agents' bash commands, first match wins: `{ "pattern": "<regex>", "action": "refuse", "reason": "…" }`, or `{ "pattern", "action": "queue", "queue": "<name>", "lane"? }`. The user's own `!` commands are not affected. |
 | `queues.<name>.slots` | required | How many jobs of this queue run at once, across all processes in the scope. Queue names use letters, digits, `.`, `_`, `-`. |

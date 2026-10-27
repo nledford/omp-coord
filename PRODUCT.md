@@ -30,7 +30,7 @@ Without it, sessions only coordinate by convention, and conventions break under 
 
 ## Product Purpose
 
-omp-coord turns those conventions into checks omp runs. A spawn over the shared cap is refused, with the session's place in line, and the next free slot is held for the session refused first. Build and test commands wait for a queue slot shared by every process in the project. Sessions see each other by letter and send each other messages that arrive in the conversation. Everything that happens goes to an event log in SQLite.
+omp-coord turns those conventions into checks omp runs. A session alone in its scope has its spawns past the cap wait in omp's own queue; with other sessions, a spawn over the shared cap is refused, with the session's place in line, and the next free slot is held for the session refused first. Build and test commands wait for a queue slot shared by every process in the project. Sessions see each other by letter and send each other messages that arrive in the conversation. Everything that happens goes to an event log in SQLite.
 
 Success: no agent starts over the cap; no slot stays taken after its process is gone (within about 10 seconds); every wait is recorded; users delete the rules omp-coord now enforces from their agent instructions.
 
@@ -80,7 +80,7 @@ Free and open source under the MIT license. No paid tier, no telemetry.
 - One machine only. Sessions find each other through a shared folder, not a network.
 - Not a security boundary: any process of the same user can bypass it.
 - Not a build system or CI: it decides when a command may run, not what it runs.
-- Not a replacement for omp's own `task.maxConcurrency`, which still limits one session.
+- Not a replacement for omp's own `task.maxConcurrency`: while a session is alone the extension sets it to what the caps allow (a value you set stays the ceiling); otherwise it still limits one session as you set it.
 - Early: not yet used beyond its author's project.
 
 ## Stack

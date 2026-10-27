@@ -15,13 +15,15 @@ Subagents count against pools of slots (for example 8 `work` and 2 `short`) shar
 
 ## Spawns wait their turn
 
-With `agents.queueSpawns` (on by default), the extension keeps omp's own per-session spawn queue, the `task.maxConcurrency` setting, at the number of this session's spawns the caps let run now: its top-level agents already running or starting, each slot held for it, and the default pool's free slots (never 0, which omp reads as unlimited; never above a value you set yourself). Start as many agents as you need: omp starts the ones that fit and keeps the rest waiting in its queue, each starting as one of this session's agents ends. Nothing is refused for being over the cap, and nothing has to be started again. The value is a runtime override, never saved, and it is cleared when the session ends.
+With `agents.queueSpawns` (on by default), while a session is the only one in its scope, the extension keeps omp's own per-session spawn queue, the `task.maxConcurrency` setting, at the number of the session's spawns the caps let run now: its top-level agents already running or starting, the default pool's free slots, and one held for it there. Start as many agents as you need: omp starts the ones that fit and keeps the rest waiting in its queue, each starting as one of the session's agents ends. A value you set yourself for `task.maxConcurrency` stays the ceiling (it is read when the session starts). The value is a runtime override, never saved, and it is cleared when the session ends.
 
-Limits, from how omp's queue works:
+When a second session joins the scope, or the scope is paused, the override is cleared and spawns over the cap are refused as described under The line below. omp re-reads its queue size only when the session asks for a spawn or one of its runs ends, and a spawn waiting in omp's queue never reaches the spawn check, so it would never join the line: across sessions, only refusals keep the line fair.
 
-- omp reads the setting when one of this session's agents starts or ends. A slot another session frees is taken up at this session's next start or end, or through the held-slot notice below.
-- omp's queue holds every agent the main session starts, so a reviewer started by the main session waits its turn too (reviewers started by subagents are not affected: each agent has its own queue). An agent of another pool (for example `short`) starts when a default-pool slot is free as well.
-- When every slot is taken by other sessions and this session runs nothing, one spawn reaches the spawn check and is refused, and the session joins the line as below.
+Limits:
+
+- omp's queue holds every agent the main session starts, so a reviewer started by the main session waits its turn too, and an agent of another pool (for example `short`) starts only when a default-pool slot is free as well. Subagents read the same setting, so a worker's own reviewers queue under the same number; with `agents.nested.maxRunningPerParent` at 1 that never delays them.
+- Agents started outside omp's queue (revived with `write agent://…`, or a workpool's workers) take slots the queue doesn't see; if they fill every slot, the override is cleared and spawns over the cap are refused.
+- A spawn approved but never started holds its slot until `agents.startTimeoutSeconds` runs out; meanwhile one more spawn can reach the spawn check and be refused.
 
 ## The line
 
@@ -35,7 +37,7 @@ When one of B's agents ends, the slot is held for A, which is woken with a notic
 
 ![The omp-coord notice "A work slot is free and held for this session until 09:47 AM", followed by the restarted agent finishing](images/slot-held.png)
 
-omp gives the spawn check 30 seconds and then lets the spawn through, so the extension never waits inside it: spawns wait in omp's queue before the check (above), and one that still reaches it over the cap is refused at once, with the next free slot held. If the shared board cannot be read, spawns are let through with an error notice: the cap is an agreement between sessions, not a security boundary.
+omp gives the spawn check 30 seconds and then lets the spawn through, so the extension never waits inside it: spawns wait in omp's queue before the check while the session is alone (above), and one that reaches it over the cap is refused at once, with the next free slot held. If the shared board cannot be read, spawns are let through with an error notice: the cap is an agreement between sessions, not a security boundary.
 
 While the machine's 1-minute load average is above a pool's `loadCaps` threshold, the lower cap applies. Running agents are never stopped; new ones wait until the total is under the lower cap.
 

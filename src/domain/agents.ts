@@ -185,6 +185,7 @@ export function agentStarted(
       pool: a.parentIsSubagent ? null : poolFor(policy, a.agentType),
       state: "running",
       since: a.now,
+      revived: true,
     };
     board.slots.push(slot);
   }
@@ -267,23 +268,27 @@ function listOr(items: string[]): string {
 
 /**
  * How many of this session's own (main-agent) spawns may run at once right now, for omp's per-session spawn queue
- * (`task.maxConcurrency`): its top-level agents already running or starting (they hold a place in that queue, inside
- * the caps or not), each slot held for it, and the default pool's free slots. Spawns past it wait in omp's queue and
- * start as places free, instead of reaching the spawn check and being refused. Other pools' free slots are left out:
- * omp's queue doesn't know a waiting spawn's pool, so counting them would let a default-pool spawn through to a
- * refusal; an agent of another pool starts when a default-pool slot is free too. At least 1, since omp reads 0 as
- * unlimited: a session with nothing running while every slot is taken lets one spawn through to the spawn check,
- * which refuses it and puts the session in line as before.
+ * (`task.maxConcurrency`), or `undefined` when the queue must not be driven and spawns are left to the spawn check.
+ *
+ * Driven only while this session is alone in the scope and not paused. omp re-reads its queue size only when this
+ * session asks for a spawn or one of its runs ends, and a spawn parked in that queue never reaches the spawn check, so
+ * it never joins the line: with other sessions, a slot one of them frees could not be held for this session fairly.
+ * There the refusal and the line decide, as they always did.
+ *
+ * Alone, the allowance is this session's top-level agents that hold a place in omp's queue (running or starting, not
+ * revived ones, which never took one), plus the default pool's free slots and one held for it there. Other pools'
+ * free slots are left out: omp's queue doesn't know a waiting spawn's pool, so counting them would let a default-pool
+ * spawn through to a refusal. `undefined` too when that comes to 0 (every slot taken by agents outside omp's queue):
+ * omp reads 0 as unlimited, and a floor of 1 would let each waiting spawn through to a refusal in turn.
  */
-export function spawnAllowance(board: Board, policy: AgentPolicy, sessionId: string, now: number): number {
-  const own = board.slots.filter(s => s.sessionId === sessionId && s.parentId === "Main").length;
-  const held = board.waitlist.filter(t => t.sessionId === sessionId && t.holdUntil !== undefined).length;
+export function spawnAllowance(board: Board, policy: AgentPolicy, sessionId: string, now: number): number | undefined {
+  if (board.pause || board.sessions.some(s => s.id !== sessionId)) return undefined;
   const pool = policy.defaultPool;
-  const waitingAhead = board.waitlist.some(
-    t => t.pool === pool && t.holdUntil === undefined && t.sessionId !== sessionId,
-  );
-  const free = waitingAhead
-    ? 0
-    : Math.max(0, capOf(board, policy, pool, now) - used(board, pool) - activeHolds(board, pool));
-  return Math.max(1, own + held + free);
+  const queued = board.slots.filter(s => s.sessionId === sessionId && s.parentId === "Main" && !s.revived).length;
+  const held = board.waitlist.filter(
+    t => t.sessionId === sessionId && t.pool === pool && t.holdUntil !== undefined,
+  ).length;
+  const free = Math.max(0, capOf(board, policy, pool, now) - used(board, pool) - activeHolds(board, pool));
+  const allowance = queued + held + free;
+  return allowance > 0 ? allowance : undefined;
 }

@@ -8,7 +8,8 @@
  * then, or by the held-slot notice; see docs/agent-slots.md.
  *
  * The setting is changed by a runtime override (never persisted) and cleared when the session stops. A value the user
- * set is a ceiling the override never exceeds. If omp's settings registry can't be loaded (an omp without it), nothing
+ * set is a ceiling the override never exceeds; it is read when the session starts, so a change to it takes effect in
+ * the next session (while the override is in place it hides the setting's other layers). If omp's settings registry can't be loaded (an omp without it), nothing
  * changes and spawns are refused as before.
  */
 
@@ -21,8 +22,11 @@ export interface SettingHandle {
 }
 
 export interface SpawnQueue {
-  /** Sets the queue's size to `allowance`, capped by the user's own value; writes only when it changes. */
-  apply(allowance: number): void;
+  /**
+   * Sets the queue's size to `allowance`, capped by the user's own value, writing only when it changes; `undefined`
+   * gives the queue back to the user's own value, leaving spawns to the spawn check.
+   */
+  apply(allowance: number | undefined): void;
   /** Removes the override, giving the session back the user's own value. */
   release(): void;
 }
@@ -38,6 +42,10 @@ export function spawnQueue(handle: SettingHandle | undefined, scope: unknown): S
   let last: number | undefined;
   return {
     apply(allowance) {
+      if (allowance === undefined) {
+        this.release();
+        return;
+      }
       // never 0: omp reads 0 as unlimited
       const value = Math.max(1, Math.min(Math.trunc(allowance), ceiling));
       if (value === last) return;

@@ -111,18 +111,15 @@ export default function ompCoord(pi: ExtensionAPI): void {
   pi.on("before_subagent_spawn", (event, ctx) => {
     const rt = shared.runtime;
     if (!rt) return undefined;
+    let decision: ReturnType<Coordinator["requestSpawn"]>;
     try {
-      const decision = rt.coordinator.requestSpawn({
+      decision = rt.coordinator.requestSpawn({
         sessionId: rt.sessionId,
         parentAgentId: ctx.agent.id,
         parentIsSubagent: ctx.agent.kind === "sub",
         agentType: event.agent.toLowerCase(),
         ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
       });
-      refreshQueue(rt);
-      if (decision.allowed) return undefined;
-      notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
-      return { block: true, reason: `omp-coord: ${decision.reason}` };
     } catch (error) {
       // The cap is a shared agreement, not a security boundary: a broken board must not stop all work.
       notify(
@@ -132,6 +129,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       );
       return undefined;
     }
+    // outside the decision: a failure here must never turn a refusal into a start
+    refreshQueue(rt);
+    if (decision.allowed) return undefined;
+    notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
+    return { block: true, reason: `omp-coord: ${decision.reason}` };
   });
 
   pi.on("agent_start", (_event, ctx) => {
@@ -449,6 +451,17 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
+  // whether spawns past the cap wait in omp's queue, and why not, for the session-start notice
+  let queue: SpawnQueue | undefined;
+  let queueNote = "Spawns past the cap are refused (agents.queueSpawns is off).";
+  if (config.agents.queueSpawns) {
+    const handle = await loadSettingHandle();
+    const scope = pi.pi?.settings;
+    queue = typeof handle === "string" ? undefined : spawnQueue(handle, scope);
+    queueNote = queue
+      ? "While this is the only session, spawns past the cap wait in omp's queue and start as slots free; with others, they are refused and this session holds a place in line."
+      : `Spawns past the cap are refused: ${typeof handle === "string" ? handle : "omp gave the extension no settings scope"}.`;
+  }
   let joined: Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label">;
   try {
     joined = openSession(config, ctx.cwd);
@@ -458,17 +471,6 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  // whether spawns past the cap wait in omp's queue, and why not, for the session-start notice
-  let queue: SpawnQueue | undefined;
-  let queueNote = "Spawns past the cap are refused (agents.queueSpawns is off).";
-  if (config.agents.queueSpawns) {
-    const handle = await loadSettingHandle();
-    const scope = pi.pi?.settings;
-    queue = typeof handle === "string" ? undefined : spawnQueue(handle, scope);
-    queueNote = queue
-      ? "Spawns past the cap wait in omp's queue and start as slots free."
-      : `Spawns past the cap are refused: ${typeof handle === "string" ? handle : "omp gave the extension no settings scope"}.`;
-  }
   const rt: Runtime = {
     config,
     ...joined,
@@ -560,7 +562,10 @@ function scratchFor(rt: Runtime, agentId?: string): string | undefined {
 /** Sets omp's spawn queue to what the caps allow this session now (a no-op when the queue isn't driven). */
 function refreshQueue(rt: Runtime): void {
   if (!rt.queue) return;
-  rt.queue.apply(spawnAllowance(rt.coordinator.board(), rt.config.agents, rt.sessionId, Date.now()));
+  const queue = rt.queue;
+  guarded(rt, "size omp's spawn queue", () =>
+    queue.apply(spawnAllowance(rt.coordinator.board(), rt.config.agents, rt.sessionId, Date.now())),
+  );
 }
 
 function stop(rt: Runtime): void {

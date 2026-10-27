@@ -78,6 +78,8 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 - A nested spawn's check runs in the child's binding (`ctx.agent.kind === "sub"`). The main agent's id is `"Main"`.
 - `spawnKey` is the new agent's id for `task`, eval `agent()` and workpools, but only a label for some callers (`/cleanse`), so `agentStarted` falls back to matching parent and type.
 - A `tool_call` handler that returns `{ input }` replaces the arguments the tool runs with; the agent sees the rewritten command in its transcript.
+- omp's spawn queue is a semaphore per TaskTool, sized from `task.maxConcurrency` (0 means unlimited) and resized only when a spawn asks for a place or a run gives one back; changing the setting alone admits nothing. Subagents read the same settings object as the main session. A runtime override (`override(scope, value)`) takes precedence over every saved layer.
+- omp maps host packages (`@oh-my-pi/pi-coding-agent/…`) onto its bundled copies by rewriting import specifiers in an extension's source as it loads it: a specifier held in a variable is missed.
 - omp's bash tool passes the omp process's environment to commands, so `OMP_COORD_SESSION` set by the extension reaches `just` recipes run by agents.
 - `sendMessage` through a subagent's binding (captured in its `session_start`) lands in that subagent's conversation, not the main session's.
 - The installed `@oh-my-pi/pi-coding-agent` package can lag the `omp` binary (17.4.1 against 18.12.6 when this was written). That is why `src/omp-api.ts` declares the API instead of importing it. Check API facts against `omp://extensions.md` from the running omp.
