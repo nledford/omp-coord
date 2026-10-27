@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
-import { decideCommand, withAgent } from "../../domain/commands.ts";
+import { decideCommand, withAgent, withoutAgentExports } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
@@ -184,13 +184,15 @@ export default function ompCoord(pi: ExtensionAPI): void {
       notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
     }
 
-    const decision = decideCommand(rt.config.commands, command, {
+    // a copied `export OMP_COORD_AGENT=…;` would otherwise end up inside a queued job's own command
+    const own = rt.config.tagAgentCommands ? withoutAgentExports(command) : command;
+    const decision = decideCommand(rt.config.commands, own, {
       ...RUNNER,
       owner: rt.sessionId,
       config: rt.config.source,
     });
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
-    const run = decision.kind === "queue" ? decision.command : command;
+    const run = decision.kind === "queue" ? decision.command : own;
     // Every agent of a session shares the omp process's environment, so the agent's id can reach `omp-coord run` (and
     // the queue lines) only through the command itself; opt-in (`tagAgentCommands`), since the rewrite defeats omp's
     // bash.patterns rules and other extensions' rewrites. Off, the hook changes only queued commands, as before.

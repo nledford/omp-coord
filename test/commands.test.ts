@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type CommandRule, decideCommand, withAgent } from "../src/domain/commands.ts";
+import { type CommandRule, decideCommand, withAgent, withoutAgentExports } from "../src/domain/commands.ts";
 
 const rules: CommandRule[] = [
   { pattern: /(^|[;&|(\s])pkill\b/, action: "refuse", reason: "stop only your own process" },
@@ -83,6 +83,18 @@ describe("the agent behind a command", () => {
     expect(withAgent("Main", once)).toBe(once);
     const piled = `export OMP_COORD_AGENT='Main'; export OMP_COORD_AGENT=Main;  ${withAgent("Wave'Import", "true")}`;
     expect(withAgent("Fixer", piled)).toBe(withAgent("Fixer", "true"));
+  });
+
+  test("a quoted value holding ';' or a newline is one prefix; a bare value holding shell syntax is the command's own", () => {
+    expect(withoutAgentExports("export OMP_COORD_AGENT='a;b\nc'; true")).toBe("true");
+    for (const own of [
+      "export OMP_COORD_AGENT=a\\;b; c",
+      "export OMP_COORD_AGENT=a|tee; c",
+      "export OMP_COORD_AGENT=a>out; c",
+      "export OMP_COORD_AGENT=`touch x`; c",
+      "export OMP_COORD_AGENT=$(date); c",
+    ])
+      expect(withoutAgentExports(own)).toBe(own);
   });
 
   test("an export of the variable later in a command, or of another variable first, is the command's own", () => {
