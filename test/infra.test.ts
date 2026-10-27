@@ -140,13 +140,15 @@ describe("board store", () => {
       ["j1", "WaveImport"],
       ["j2", undefined],
     ]);
-    // an older omp-coord still running writes jobs without the column: they read back with no agent
+    // an older omp-coord still running saves the whole board without the column (DELETE, then INSERT by name): every
+    // recorded agent is dropped until no older session is left; the board stays readable
     const older = new Database(db);
+    older.exec("DELETE FROM jobs");
     older.exec(
-      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since) VALUES ('j3', 'heavy', 'a', 'normal', 0, NULL, 'x', '/s/j3', 1, 'waiting', 2)",
+      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since) VALUES ('j1', 'heavy', 'a', 'normal', 0, 'w j1', 'cargo x', '/s/j1', 1, 'waiting', 1)",
     );
     older.close();
-    expect(new BoardStore(db).read().jobs.find(j => j.id === "j3")?.agent).toBeUndefined();
+    expect(new BoardStore(db).read().jobs.map(j => [j.id, j.agent])).toEqual([["j1", undefined]]);
   });
 
   test("pause, claims, ports, load and notes round-trip; notes are kept when no longer in the loaded window", () => {

@@ -407,6 +407,8 @@ describe("queue lines", () => {
       });
     enqueue("j1", { key: "rebase-2204 ci", agent: "WaveUIPanels" }, MIN);
     enqueue("j2", {}, 2 * MIN);
+    const queued = board.events.filter(e => e.type === "job_queued").map(e => e.data.agent);
+    expect(queued).toEqual(["WaveUIPanels", undefined]);
     const lines = formatQueues(board, config.queues, 3 * MIN);
     expect(lines.find(l => l.includes("j1"))).toMatch(/session A\/WaveUIPanels\s.*\srebase-2204 ci$/);
     expect(lines.find(l => l.includes("j1"))).not.toContain("scripts/ci.sh");

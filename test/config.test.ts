@@ -34,6 +34,14 @@ describe("config", () => {
     expect(() => parseConfig({ scope: "p", history: { retentionDays: 0 } }, "f")).toThrow(/history\.retentionDays/);
   });
 
+  test("tagging agent commands is off unless the file turns it on, and must be true or false", () => {
+    expect(parseConfig({ scope: "p" }, "f").tagAgentCommands).toBe(false);
+    expect(parseConfig({ scope: "p", tagAgentCommands: true }, "f").tagAgentCommands).toBe(true);
+    expect(() => parseConfig({ scope: "p", tagAgentCommands: "yes" }, "f")).toThrow(
+      new ConfigError("f: tagAgentCommands must be true or false"),
+    );
+  });
+
   test("errors name the field that is wrong", () => {
     expect(() => parseConfig({ scope: "p", agents: { pools: { work: { cap: 0 } } } }, "f")).toThrow(
       new ConfigError("f: agents.pools.work.cap must be a whole number of at least 1"),

@@ -132,7 +132,7 @@ export function formatQueues(board: Board, queues: Queues, now: number): string[
     (j.agent ? `/${j.agent}` : "");
   // what it is: the job's key ("<checkout> <recipe> <args>") reads better than the command's full path; the command
   // when there is no key
-  const what = (j: Job) => j.key ?? j.command;
+  const what = (j: Job) => j.key || j.command;
   for (const [name, q] of Object.entries(queues)) {
     const running = board.jobs.filter(j => j.queue === name && j.state === "running");
     const waiting = orderWaiting(q, name, board, now);

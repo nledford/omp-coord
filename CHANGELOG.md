@@ -8,7 +8,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ### Added
 
-- Each queued job records the agent whose command queued it: the queue lines in `/coord` and `omp-coord status` read `session A/WaveImport`, and `status --json` has `agent` on each job. The extension's bash hook starts every agent command with `export OMP_COORD_AGENT=<agent id>;`, which `omp-coord run` reads. A board made by an older omp-coord gains the column when a newer one opens it, and an older one still running keeps working with it (its jobs show no agent).
+- `tagAgentCommands` (off by default): each queued job records the agent whose command queued it, and the queue lines in `/coord` and `omp-coord status` read `session A/WaveImport`; `status --json` has `agent` on each job and the `job_queued` event carries it. With it on, the extension starts every agent bash command with `export OMP_COORD_AGENT=<agent id>;`, which `omp-coord run` reads; leave it off if you use omp's `bash.patterns` rules or another extension that rewrites bash commands. A board made by an older omp-coord gains the new column when this version opens it; while any session of the scope still runs an older omp-coord, its saves drop the recorded agents (display only).
 
 ### Changed
 
