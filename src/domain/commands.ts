@@ -74,6 +74,7 @@ export function withoutAgentExports(command: string): string {
  * conversation shows, so an agent that copies its earlier calls sends them back; without stripping, each call would
  * add one more. A value is single-quoted as `quote` writes it (`'\''` for a quote inside) or a bare word of
  * shell-safe characters only, so a hand-typed value holding `\;`, `|`, `>` or a substitution is never mistaken for
- * a prefix and nothing of the command itself is dropped.
+ * a prefix and nothing of the command itself is dropped. Only spaces and tabs may surround the assignment: in bash a
+ * newline ends a command, so an `export` alone on its line is a command of its own, not part of a prefix.
  */
-const LEADING_AGENT_EXPORTS = /^(?:\s*export\s+OMP_COORD_AGENT=(?:'(?:[^']|'\\'')*'|[\w.@%+,:/=-]+)\s*;)+\s*/;
+const LEADING_AGENT_EXPORTS = /^(?:\s*export[ \t]+OMP_COORD_AGENT=(?:'(?:[^']|'\\'')*'|[\w.@%+,:/=-]+)[ \t]*;)+\s*/;

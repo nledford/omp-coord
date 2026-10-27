@@ -65,11 +65,18 @@ jobs:
             echo "@nledford/omp-coord@$version is already on npmjs.com"
             exit 0
           fi
-          # A version npm already holds, even one still being processed, is refused as a conflict: that is a success.
+          # A version npm already holds, even one still being processed, is refused as a conflict. A conflict counts as
+          # success only once the registry shows this exact version (npm may take minutes to list it); otherwise fail.
           if ! npm publish --access public --registry "$registry" 2>&1 | tee "$RUNNER_TEMP/publish.log"; then
             if grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|E409|already exists in live registry" "$RUNNER_TEMP/publish.log"; then
-              echo "npm already holds @nledford/omp-coord@$version"
-              exit 0
+              for _ in $(seq 40); do
+                if [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ]; then
+                  echo "npm already holds @nledford/omp-coord@$version"
+                  exit 0
+                fi
+                sleep 15
+              done
+              echo "npm refused the publish as a conflict, but @nledford/omp-coord@$version did not appear within 10 minutes" >&2
             fi
             exit 1
           fi

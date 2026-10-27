@@ -93,6 +93,9 @@ describe("the agent behind a command", () => {
       "export OMP_COORD_AGENT=a>out; c",
       "export OMP_COORD_AGENT=`touch x`; c",
       "export OMP_COORD_AGENT=$(date); c",
+      // a newline ends a command in bash: `export` alone on its line, or the `;` on the next, isn't a prefix
+      "export\nOMP_COORD_AGENT=old; echo done",
+      "export OMP_COORD_AGENT=old\n; echo done",
     ])
       expect(withoutAgentExports(own)).toBe(own);
   });
