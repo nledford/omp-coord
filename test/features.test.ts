@@ -358,6 +358,103 @@ describe("history from the event log", () => {
     ]);
   });
 
+  describe("agents revived after their session left", () => {
+    // A spawned agent's first run: approval in the parent, then the run (`revived: false`).
+    const spawned = (b: Board, sessionId: string, agentId: string, now: number) => {
+      spawn(b, sessionId, "task", now);
+      start(b, sessionId, agentId, now);
+    };
+    // A run with no spawn approval, as `write agent://<id>` starts it (`revived: true`).
+    const start = (b: Board, sessionId: string, agentId: string, now: number) =>
+      agentStarted(b, policy, {
+        sessionId,
+        agentId,
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now,
+      });
+    const restarted = (b: Board, id: string, cwd: string, now: number) =>
+      registerSession(b, { id, pid: 2, cwd, socket: `/s/${id}`, configHash: "h", now });
+    const crashed = (b: Board) => {
+      spawned(b, "a", "Fix1", 1);
+      spawned(b, "a", "Fix2", 1);
+      start(b, "a", "Fix1.Rev", 2);
+      removeSession(b, policy, "a", 3);
+    };
+
+    test("a revived agent and its nested helpers are no longer listed; the rest is", () => {
+      const events = log(b => {
+        crashed(b);
+        restarted(b, "c", "/w/a", 4);
+        start(b, "c", "Fix1", 5);
+        agentEnded(b, policy, { sessionId: "c", agentId: "Fix1", now: 6 });
+      });
+      expect(interrupted(events, 0)).toEqual([
+        { label: "A", cwd: "/w/a", leftAt: 3, agents: [{ id: "Fix2", type: "task", startedAt: 1 }] },
+      ]);
+    });
+
+    test("a session whose agents were all revived is left out", () => {
+      const events = log(b => {
+        crashed(b);
+        restarted(b, "c", "/w/a", 4);
+        start(b, "c", "Fix1", 5);
+        start(b, "c", "Fix2", 5);
+      });
+      expect(interrupted(events, 0)).toEqual([]);
+    });
+
+    const listedA = {
+      label: "A",
+      cwd: "/w/a" as string | undefined,
+      leftAt: 3,
+      agents: [
+        { id: "Fix1", type: "task", startedAt: 1 },
+        { id: "Fix2", type: "task", startedAt: 1 },
+        { id: "Fix1.Rev", type: "task", startedAt: 2 },
+      ],
+    };
+    const allListed = [listedA];
+
+    test("a new agent reusing the name, or a revival from another folder, hides nothing", () => {
+      const events = log(b => {
+        crashed(b);
+        // spawned anew in the same folder: not a revival
+        restarted(b, "c", "/w/a", 4);
+        spawned(b, "c", "Fix1", 5);
+        // revived, but from another folder
+        start(b, "b", "Fix2", 5);
+      });
+      expect(interrupted(events, 0)).toEqual(allListed);
+    });
+
+    test("a session running its own agent again hides nothing", () => {
+      const events = log(b => {
+        // a session in the same folder spawned its own Fix1 and Fix2 before A left, and runs them again after
+        restarted(b, "c", "/w/a", 0);
+        spawned(b, "c", "Fix1", 1);
+        spawned(b, "c", "Fix2", 1);
+        agentEnded(b, policy, { sessionId: "c", agentId: "Fix1", now: 1 });
+        agentEnded(b, policy, { sessionId: "c", agentId: "Fix2", now: 1 });
+        crashed(b);
+        start(b, "c", "Fix1", 5);
+        start(b, "c", "Fix2", 5);
+      });
+      expect(interrupted(events, 0)).toEqual(allListed);
+    });
+
+    test("a revival whose folder is unknown (its join event pruned) hides nothing", () => {
+      const events = log(b => {
+        crashed(b);
+        restarted(b, "c", "/w/a", 4);
+        start(b, "c", "Fix1", 5);
+        start(b, "c", "Fix2", 5);
+      }).filter(e => e.type !== "session_joined");
+      expect(interrupted(events, 0)).toEqual([{ ...listedA, cwd: undefined }]);
+    });
+  });
+
   test("stats count refusals, waits, peak agents and job outcomes per day", () => {
     const events = log(b => {
       spawn(b, "a", "task", 0);

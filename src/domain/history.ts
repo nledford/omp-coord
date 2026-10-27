@@ -11,18 +11,34 @@ export interface InterruptedSession {
 /**
  * Sessions that left (exited, or were found dead) at or after `since` while some of their agents were in a run:
  * those runs started and never ended. Revive them with `write agent://<id>` from a session in the same folder.
+ *
+ * An agent revived since, from a session in the same folder, is no longer listed, and neither are its nested
+ * helpers (they aren't restarted; reviving the parent covers them); a session with nothing left is left out. A
+ * revival is a run that started without a spawn approval (`revived` in the event) by an id that session hadn't run
+ * before: a new agent that reuses the name was spawned, so it doesn't hide the old one. A session whose folder is
+ * unknown (its join event pruned) never hides anything.
  */
 export function interrupted(events: BoardEvent[], since: number): InterruptedSession[] {
   const cwd = new Map<string, string>();
   const running = new Map<string, Map<string, { id: string; type: string; startedAt: number }>>();
+  const seen = new Map<string, Set<string>>();
+  // The latest revival per folder and agent id.
+  const revivedAt = new Map<string, number>();
   const result: InterruptedSession[] = [];
   for (const e of events) {
     if (e.sessionId === null) continue;
     const runs = running.get(e.sessionId) ?? new Map();
     running.set(e.sessionId, runs);
     if (e.type === "session_joined" && typeof e.data.cwd === "string") cwd.set(e.sessionId, e.data.cwd);
-    if (e.type === "run_started")
-      runs.set(String(e.data.agentId), { id: String(e.data.agentId), type: String(e.data.agentType), startedAt: e.at });
+    if (e.type === "run_started") {
+      const id = String(e.data.agentId);
+      runs.set(id, { id, type: String(e.data.agentType), startedAt: e.at });
+      const own = seen.get(e.sessionId) ?? new Set<string>();
+      seen.set(e.sessionId, own);
+      const folder = cwd.get(e.sessionId);
+      if (folder !== undefined && e.data.revived === true && !own.has(id)) revivedAt.set(`${folder}\u0000${id}`, e.at);
+      own.add(id);
+    }
     if (e.type === "run_ended") runs.delete(String(e.data.agentId));
     if (e.type === "session_left") {
       if (e.at >= since && runs.size)
@@ -30,7 +46,17 @@ export function interrupted(events: BoardEvent[], since: number): InterruptedSes
       running.delete(e.sessionId);
     }
   }
-  return result;
+  const revivedSince = (folder: string | undefined, id: string, leftAt: number): boolean =>
+    folder !== undefined && (revivedAt.get(`${folder}\u0000${id}`) ?? 0) > leftAt;
+  return result
+    .map(s => ({
+      ...s,
+      agents: s.agents.filter(a => {
+        const top = a.id.split(".")[0] ?? a.id;
+        return !revivedSince(s.cwd, a.id, s.leftAt) && !revivedSince(s.cwd, top, s.leftAt);
+      }),
+    }))
+    .filter(s => s.agents.length > 0);
 }
 
 export interface QueueDay {
