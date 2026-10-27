@@ -42,6 +42,14 @@ describe("config", () => {
     );
   });
 
+  test("spawns wait in omp's queue unless the file turns it off; the switch must be true or false", () => {
+    expect(parseConfig({ scope: "p" }, "f").agents.queueSpawns).toBe(true);
+    expect(parseConfig({ scope: "p", agents: { queueSpawns: false } }, "f").agents.queueSpawns).toBe(false);
+    expect(() => parseConfig({ scope: "p", agents: { queueSpawns: 1 } }, "f")).toThrow(
+      new ConfigError("f: agents.queueSpawns must be true or false"),
+    );
+  });
+
   test("errors name the field that is wrong", () => {
     expect(() => parseConfig({ scope: "p", agents: { pools: { work: { cap: 0 } } } }, "f")).toThrow(
       new ConfigError("f: agents.pools.work.cap must be a whole number of at least 1"),

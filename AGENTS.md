@@ -48,6 +48,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
 | `src/adapters/os/load.ts`, `process-group.ts` | `LoadProbe` from the 1-minute load average; whether a timed-out job's process group still has a running member (zombies do not count). |
 | `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run, and with `tagAgentCommands` starts each agent command with `export OMP_COORD_AGENT=<agent id>;`. Keeps each subagent's binding to deliver messages to it. |
+| `src/adapters/omp/spawn-queue.ts` | Drives omp's per-session spawn queue (`task.maxConcurrency`) from `spawnAllowance` through omp's settings registry, loaded at run time (absent outside omp: nothing driven). |
 | `src/adapters/cli/cli.ts` | `omp-coord` subcommands: argument parsing, signals, time limits and process spawning around the use cases; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for a queued command. |
 | `src/adapters/text/report.ts` | Text for `/coord`, the tools, the `omp-coord` subcommands and the footer. |
 
@@ -77,6 +78,8 @@ Observed on omp 18.12.6; re-check after omp upgrades.
 - A nested spawn's check runs in the child's binding (`ctx.agent.kind === "sub"`). The main agent's id is `"Main"`.
 - `spawnKey` is the new agent's id for `task`, eval `agent()` and workpools, but only a label for some callers (`/cleanse`), so `agentStarted` falls back to matching parent and type.
 - A `tool_call` handler that returns `{ input }` replaces the arguments the tool runs with; the agent sees the rewritten command in its transcript.
+- omp's spawn queue is a semaphore per TaskTool, sized from `task.maxConcurrency` (0 means unlimited) and resized only when a spawn asks for a place or a run gives one back; changing the setting alone admits nothing. Subagents read the same settings object as the main session, and an eval workpool sizes itself from the same setting. Workpool workers and eval `agent()` spawns (`invocationKind` "eval") take no place in the queue. A runtime override (`override(scope, value)`) takes precedence over every saved layer.
+- omp maps host packages (`@oh-my-pi/pi-coding-agent/…`) onto its bundled copies by rewriting import specifiers in an extension's source as it loads it: a specifier held in a variable is missed.
 - omp's bash tool passes the omp process's environment to commands, so `OMP_COORD_SESSION` set by the extension reaches `just` recipes run by agents.
 - `sendMessage` through a subagent's binding (captured in its `session_start`) lands in that subagent's conversation, not the main session's.
 - The installed `@oh-my-pi/pi-coding-agent` package can lag the `omp` binary (17.4.1 against 18.12.6 when this was written). That is why `src/omp-api.ts` declares the API instead of importing it. Check API facts against `omp://extensions.md` from the running omp.

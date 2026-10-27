@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
+import { spawnAllowance } from "../../domain/agents.ts";
 import { decideCommand, withAgent, withoutAgentExports } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
@@ -31,6 +32,7 @@ import {
 } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
+import { loadSettingHandle, type SpawnQueue, spawnQueue } from "./spawn-queue.ts";
 
 /**
  * How agents' queued commands start the runner: the omp binary itself runs the CLI adapter as Bun
@@ -60,6 +62,12 @@ interface Runtime {
   ticks: number;
   footer: string | undefined;
   pruning: boolean;
+  /** Drives omp's spawn queue (`agents.queueSpawns`); undefined when off or unavailable. */
+  queue: SpawnQueue | undefined;
+  /** Whether spawns past the cap wait in omp's queue, or why not; shown in coord_status and /coord. */
+  queueNote: string;
+  /** Agents first started by an eval spawn (workpool workers): their later runs are marked "eval" too. */
+  evalAgents: Set<string>;
 }
 
 interface Shared {
@@ -68,13 +76,17 @@ interface Shared {
   inactive: string;
   /** Each subagent's binding, by agent id: a message for that subagent is sent through it. */
   bindings: Map<string, ExtensionAPI>;
+  /** Main-session bindings that shut down, so a `start` for one that awaited across its own shutdown gives up. */
+  shutDown: WeakSet<ExtensionAPI>;
 }
 
 /** Shared by every copy of this module in the process (omp re-imports extensions for isolated subagents). */
 const shared: Shared = (() => {
   const store = globalThis as { [key: symbol]: Shared | undefined };
   const key = Symbol.for("omp-coord.runtime");
-  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map() };
+  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map(), shutDown: new WeakSet() };
+  // a copy made by an older version of this module in the same process has no set yet
+  store[key].shutDown ??= new WeakSet();
   return store[key];
 })();
 
@@ -99,23 +111,24 @@ export default function ompCoord(pi: ExtensionAPI): void {
       if (shared.bindings.get(ctx.agent.id) === pi) shared.bindings.delete(ctx.agent.id);
       return;
     }
+    shared.shutDown.add(pi);
     if (shared.runtime?.pi === pi) stop(shared.runtime);
   });
 
   pi.on("before_subagent_spawn", (event, ctx) => {
     const rt = shared.runtime;
     if (!rt) return undefined;
+    let decision: ReturnType<Coordinator["requestSpawn"]>;
     try {
-      const decision = rt.coordinator.requestSpawn({
+      decision = rt.coordinator.requestSpawn({
         sessionId: rt.sessionId,
         parentAgentId: ctx.agent.id,
         parentIsSubagent: ctx.agent.kind === "sub",
         agentType: event.agent.toLowerCase(),
         ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
+        ...(event.invocationKind === undefined ? {} : { invocationKind: event.invocationKind }),
       });
-      if (decision.allowed) return undefined;
-      notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
-      return { block: true, reason: `omp-coord: ${decision.reason}` };
+      if (event.invocationKind === "eval" && event.spawnKey !== undefined) rt.evalAgents.add(event.spawnKey);
     } catch (error) {
       // The cap is a shared agreement, not a security boundary: a broken board must not stop all work.
       notify(
@@ -125,6 +138,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       );
       return undefined;
     }
+    // outside the decision: a failure here must never turn a refusal into a start
+    refreshQueue(rt);
+    if (decision.allowed) return undefined;
+    notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
+    return { block: true, reason: `omp-coord: ${decision.reason}` };
   });
 
   pi.on("agent_start", (_event, ctx) => {
@@ -138,7 +156,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
         parentId,
         parentIsSubagent: parentId !== "Main",
         agentType: ctx.agent.name.toLowerCase(),
+        evalWorker: rt.evalAgents.has(ctx.agent.id),
       });
+      refreshQueue(rt);
       if (count && count.used > count.cap) {
         notify(
           rt,
@@ -152,9 +172,10 @@ export default function ompCoord(pi: ExtensionAPI): void {
   pi.on("agent_end", (_event, ctx) => {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
-    guarded(rt, "free an agent slot", () =>
-      rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id }),
-    );
+    guarded(rt, "free an agent slot", () => {
+      rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id });
+      refreshQueue(rt);
+    });
   });
 
   pi.on("tool_call", (event, ctx) => {
@@ -429,6 +450,8 @@ export default function ompCoord(pi: ExtensionAPI): void {
 }
 
 async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+  // a binding started again after an earlier shutdown starts fresh
+  shared.shutDown.delete(pi);
   const configPath = findConfigFile(ctx.cwd);
   if (!configPath) return;
   let config: Config;
@@ -440,6 +463,19 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
+  // whether spawns past the cap wait in omp's queue, and why not, for the session-start notice
+  let queue: SpawnQueue | undefined;
+  let queueNote = "Spawns past the cap are refused (agents.queueSpawns is off).";
+  if (config.agents.queueSpawns) {
+    const handle = await loadSettingHandle();
+    // this session ended (switched or reloaded) while the handle loaded: don't join the board for it
+    if (shared.shutDown.has(pi)) return;
+    const scope = pi.pi?.settings;
+    queue = typeof handle === "string" ? undefined : spawnQueue(handle, scope);
+    queueNote = queue
+      ? "While this is the only session, spawns past the cap wait in omp's queue and start as slots free; with others, they are refused and this session holds a place in line."
+      : `Spawns past the cap are refused: ${typeof handle === "string" ? handle : "omp gave the extension no settings scope"}.`;
+  }
   let joined: Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label">;
   try {
     joined = openSession(config, ctx.cwd);
@@ -449,7 +485,19 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  const rt: Runtime = { config, ...joined, pi, ctx, timer: undefined, ticks: 0, footer: undefined, pruning: false };
+  const rt: Runtime = {
+    config,
+    ...joined,
+    pi,
+    ctx,
+    timer: undefined,
+    ticks: 0,
+    footer: undefined,
+    pruning: false,
+    queue,
+    queueNote,
+    evalAgents: new Set(),
+  };
   shared.runtime = rt;
   // Commands this session's agents run (e.g. a `just` recipe calling `omp-coord run`) see these.
   process.env.OMP_COORD_SESSION = rt.sessionId;
@@ -458,6 +506,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const scratch = scratchFor(rt);
   if (scratch) process.env.OMP_COORD_SCRATCH = scratch;
   rt.timer = ctx.setInterval(() => tick(rt), TICK_MS);
+  refreshQueue(rt);
   await prune(rt);
 
   const board = rt.coordinator.board();
@@ -470,7 +519,8 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
       (others.length
         ? `Other sessions: ${others.map(s => `${s.label} (${s.cwd})`).join(", ")}. Agent caps are shared with them.`
         : "No other session is active.") +
-      pausedNote,
+      pausedNote +
+      ` ${queueNote}`,
     "info",
   );
   if (differing.length) {
@@ -524,8 +574,18 @@ function scratchFor(rt: Runtime, agentId?: string): string | undefined {
   return dir;
 }
 
+/** Sets omp's spawn queue to what the caps allow this session now (a no-op when the queue isn't driven). */
+function refreshQueue(rt: Runtime): void {
+  if (!rt.queue) return;
+  const queue = rt.queue;
+  guarded(rt, "size omp's spawn queue", () =>
+    queue.apply(spawnAllowance(rt.coordinator.board(), rt.config.agents, rt.sessionId, Date.now())),
+  );
+}
+
 function stop(rt: Runtime): void {
   shared.runtime = undefined;
+  rt.queue?.release();
   for (const key of ["OMP_COORD_SESSION", "OMP_COORD_PORTS", "OMP_COORD_SCRATCH"]) delete process.env[key];
   rt.ctx.clearTimer(rt.timer);
   try {
@@ -542,6 +602,7 @@ async function tick(rt: Runtime): Promise<void> {
   const now = Date.now();
   const { label, inbox, holds, board } = rt.coordinator.tick(identity(rt.sessionId, rt.ctx.cwd, rt.listener));
   rt.label = label;
+  rt.queue?.apply(spawnAllowance(board, rt.config.agents, rt.sessionId, now));
 
   for (const m of inbox) {
     const body =
@@ -590,7 +651,14 @@ function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
 }
 
 function statusText(rt: Runtime): string {
-  return formatStatus(rt.coordinator.board(), rt.config, rt.sessionId, Date.now());
+  const board = rt.coordinator.board();
+  // whether this session's spawns wait in omp's queue right now, and why not
+  const queueLine = !rt.queue
+    ? rt.queueNote
+    : spawnAllowance(board, rt.config.agents, rt.sessionId, Date.now()) !== undefined
+      ? "Spawns past the cap wait in omp's queue and start as slots free (this is the only session)."
+      : `Spawns over the cap are refused and put this session in line (${board.pause ? "the scope is paused" : board.sessions.length > 1 ? "other sessions are in the scope" : board.slots.some(x => x.sessionId === rt.sessionId && x.unqueued === "eval") ? "a workpool's workers are running" : "no slot is free for a new spawn"}).`;
+  return `${formatStatus(board, rt.config, rt.sessionId, Date.now())}\n${queueLine}`;
 }
 
 function deliver(binding: ExtensionAPI, content: string): void {

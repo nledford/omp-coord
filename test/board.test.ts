@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentEnded, agentStarted, expire, requestSpawn, takeNewHolds } from "../src/domain/agents.ts";
+import { agentEnded, agentStarted, expire, requestSpawn, spawnAllowance, takeNewHolds } from "../src/domain/agents.ts";
 import { sendMessage, takeInbox } from "../src/domain/messages.ts";
 import { type AgentPolicy, type Board, emptyBoard } from "../src/domain/model.ts";
 import { registerSession, removeSession } from "../src/domain/sessions.ts";
@@ -14,6 +14,7 @@ const policy: AgentPolicy = {
   holdMs: 5 * MIN,
   startTimeoutMs: MIN,
   messagesPerMinute: 3,
+  queueSpawns: true,
 };
 
 function boardWith(...ids: string[]): Board {
@@ -440,5 +441,147 @@ describe("event log", () => {
       ["message_sent", "A", { to: ["B"], chars: 11 }],
       ["session_left", "B", {}],
     ]);
+  });
+});
+
+describe("how many of a session's own spawns may run at once (omp's spawn queue)", () => {
+  const allowance = (board: Board, session: string, now = 0) => spawnAllowance(board, policy, session, now);
+
+  test("alone, a session may start the default pool's cap; each of its running agents keeps its place", () => {
+    const board = boardWith("a");
+    expect(allowance(board, "a")).toBe(2);
+    run(board, "a", "A1");
+    expect(allowance(board, "a")).toBe(2);
+    run(board, "a", "A2");
+    expect(allowance(board, "a")).toBe(2);
+  });
+
+  test("with another session in the scope the queue isn't driven: the spawn check and the line decide", () => {
+    const board = boardWith("a", "b");
+    expect(allowance(board, "a")).toBeUndefined();
+    removeSession(board, policy, "b", 0);
+    expect(allowance(board, "a")).toBe(2);
+  });
+
+  test("while paused the queue isn't driven", () => {
+    const board = boardWith("a");
+    run(board, "a", "A1");
+    board.pause = { by: null, reason: "maintenance", since: 0 };
+    expect(allowance(board, "a")).toBeUndefined();
+  });
+
+  test("a revived agent takes a slot but no place in omp's queue, so it isn't counted", () => {
+    const board = boardWith("a");
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "Old",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 0,
+    });
+    run(board, "a", "A1");
+    // A1 holds a place in omp's queue, Old only a slot: the allowance is A1's place and nothing free (1), not 2
+    expect(allowance(board, "a")).toBe(1);
+  });
+
+  test("while a workpool worker (an eval spawn) runs, the queue isn't driven: the workpool sizes itself from it too", () => {
+    const board = boardWith("a");
+    run(board, "a", "A1");
+    expect(allowance(board, "a")).toBe(2);
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "W1",
+      invocationKind: "eval",
+      now: 0,
+    });
+    expect(allowance(board, "a")).toBeUndefined();
+    agentEnded(board, policy, { sessionId: "a", agentId: "W1", now: 1 });
+    expect(allowance(board, "a", 1)).toBe(2);
+  });
+
+  test("a workpool worker's later run (no spawn check) is marked eval too, so the queue stays undriven while it works", () => {
+    const board = boardWith("a");
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "W1",
+      invocationKind: "eval",
+      now: 0,
+    });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "W1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 0,
+    });
+    agentEnded(board, policy, { sessionId: "a", agentId: "W1", now: 1 });
+    expect(allowance(board, "a", 1)).toBe(2);
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "W1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      evalWorker: true,
+      now: 2,
+    });
+    expect(allowance(board, "a", 2)).toBeUndefined();
+  });
+
+  test("with every slot taken by agents outside omp's queue it isn't driven, rather than let spawns through one by one", () => {
+    const board = boardWith("a");
+    for (const id of ["Old1", "Old2"])
+      agentStarted(board, policy, {
+        sessionId: "a",
+        agentId: id,
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        now: 0,
+      });
+    expect(allowance(board, "a")).toBeUndefined();
+  });
+
+  test("a slot held for this session counts in the default pool only", () => {
+    const board = boardWith("a", "b");
+    run(board, "b", "B1");
+    run(board, "b", "B2");
+    expect(spawn(board, "a").allowed).toBe(false);
+    expect(spawn(board, "a", "scout").allowed).toBe(true); // short pool, cap 1: A takes it
+    agentEnded(board, policy, { sessionId: "b", agentId: "B1", now: MIN }); // a work slot is held for A
+    removeSession(board, policy, "b", MIN); // B leaves; A is alone again
+    // A: the scout (starting) + the held work slot + work's free slot (B2's, now gone with B)
+    expect(allowance(board, "a", MIN)).toBe(3);
+  });
+
+  test("a slot held for this session in another pool adds nothing to the default pool's queue", () => {
+    const board = boardWith("a", "b");
+    run(board, "b", "S1", "scout"); // B fills short
+    expect(spawn(board, "a", "scout").allowed).toBe(false);
+    agentEnded(board, policy, { sessionId: "b", agentId: "S1", now: MIN }); // a short slot is held for A
+    removeSession(board, policy, "b", MIN);
+    expect(allowance(board, "a", MIN)).toBe(2);
+  });
+
+  test("top-level reviewers hold a place too; subagents' reviewers don't", () => {
+    const board = boardWith("a");
+    run(board, "a", "R1", "reviewer");
+    expect(allowance(board, "a")).toBe(3);
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "R1",
+      parentIsSubagent: true,
+      agentType: "reviewer",
+      now: 0,
+    });
+    expect(allowance(board, "a")).toBe(3);
   });
 });

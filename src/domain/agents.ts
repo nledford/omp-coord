@@ -35,6 +35,8 @@ export interface SpawnRequest {
   agentType: string;
   /** omp's spawn key: the new agent's id for `task`, eval `agent()` and workpools; only a label for some callers. */
   spawnKey?: string;
+  /** How omp starts it; "eval" (eval `agent()` and workpool workers) takes no place in omp's spawn queue. */
+  invocationKind?: string;
   now: number;
 }
 
@@ -123,6 +125,7 @@ function addStartingSlot(board: Board, req: SpawnRequest, pool: string | null): 
     pool,
     state: "starting",
     since: req.now,
+    ...(req.invocationKind === "eval" ? { unqueued: "eval" as const } : {}),
   });
   emit(board, req.now, "spawn_approved", req.sessionId, {
     agentType: req.agentType,
@@ -146,6 +149,11 @@ export function agentStarted(
     parentId: string;
     parentIsSubagent: boolean;
     agentType: string;
+    /**
+     * A workpool worker's later run (its first run was an eval spawn): omp runs it outside the spawn check and the
+     * spawn queue, so its new slot is marked "eval", not "revived".
+     */
+    evalWorker?: boolean;
     now: number;
   },
 ): { pool: string; used: number; cap: number } | null {
@@ -185,6 +193,7 @@ export function agentStarted(
       pool: a.parentIsSubagent ? null : poolFor(policy, a.agentType),
       state: "running",
       since: a.now,
+      unqueued: a.evalWorker ? "eval" : "revived",
     };
     board.slots.push(slot);
   }
@@ -263,4 +272,34 @@ function listOr(items: string[]): string {
   if (items.length === 0) return "nothing";
   if (items.length === 1) return items[0] as string;
   return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+}
+
+/**
+ * How many of this session's own (main-agent) spawns may run at once right now, for omp's per-session spawn queue
+ * (`task.maxConcurrency`), or `undefined` when the queue must not be driven and spawns are left to the spawn check.
+ *
+ * Driven only while this session is alone in the scope, not paused, and runs no eval workpool workers. omp re-reads its queue size only when this
+ * session asks for a spawn or one of its runs ends, and a spawn parked in that queue never reaches the spawn check, so
+ * it never joins the line: with other sessions, a slot one of them frees could not be held for this session fairly.
+ * There the refusal and the line decide, as they always did.
+ *
+ * Alone, the allowance is this session's top-level agents that hold a place in omp's queue (running or starting, not
+ * `unqueued` ones: revived agents and workpool workers), plus the default pool's free slots and one held for it there. Other pools'
+ * free slots are left out: omp's queue doesn't know a waiting spawn's pool, so counting them would let a default-pool
+ * spawn through to a refusal. `undefined` too when that comes to 0 (every slot taken by agents outside omp's queue):
+ * omp reads 0 as unlimited, and a floor of 1 would let each waiting spawn through to a refusal in turn.
+ */
+export function spawnAllowance(board: Board, policy: AgentPolicy, sessionId: string, now: number): number | undefined {
+  if (board.pause || board.sessions.some(s => s.id !== sessionId)) return undefined;
+  // an eval workpool sizes itself from the same setting while its own workers take slots: one number can't size
+  // both queues, so while workers run the spawn check decides
+  if (board.slots.some(s => s.sessionId === sessionId && s.unqueued === "eval")) return undefined;
+  const pool = policy.defaultPool;
+  const queued = board.slots.filter(s => s.sessionId === sessionId && s.parentId === "Main" && !s.unqueued).length;
+  const held = board.waitlist.filter(
+    t => t.sessionId === sessionId && t.pool === pool && t.holdUntil !== undefined,
+  ).length;
+  const free = Math.max(0, capOf(board, policy, pool, now) - used(board, pool) - activeHolds(board, pool));
+  const allowance = queued + held + free;
+  return allowance > 0 ? allowance : undefined;
 }

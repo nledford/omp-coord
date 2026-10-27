@@ -151,6 +151,36 @@ describe("board store", () => {
     expect(new BoardStore(db).read().jobs.map(j => [j.id, j.agent])).toEqual([["j1", undefined]]);
   });
 
+  test("a slot holding no place in omp's queue stays marked, and a board made before slots recorded it gains the column", () => {
+    const db = freshDb();
+    new BoardStore(db).close();
+    const old = new Database(db);
+    old.exec("ALTER TABLE slots DROP COLUMN unqueued");
+    old.close();
+    const store = new BoardStore(db);
+    const slot = {
+      sessionId: "a",
+      parentId: "Main",
+      agentType: "task",
+      pool: "work",
+      state: "running" as const,
+      since: 1,
+    };
+    store.transact(b => {
+      join_("a")(b);
+      b.slots.push(
+        { ...slot, agentId: "Old", unqueued: "revived" },
+        { ...slot, agentId: "W", unqueued: "eval" },
+        { ...slot, agentId: "New" },
+      );
+    });
+    expect(store.read().slots.map(s => [s.agentId, s.unqueued])).toEqual([
+      ["Old", "revived"],
+      ["W", "eval"],
+      ["New", undefined],
+    ]);
+  });
+
   test("pause, claims, ports, load and notes round-trip; notes are kept when no longer in the loaded window", () => {
     const store = new BoardStore(freshDb());
     store.transact(b => {

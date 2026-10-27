@@ -6,6 +6,11 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** while a session is the only one in its scope, spawns past the cap now wait their turn instead of being refused (`agents.queueSpawns`, on by default): the extension keeps omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow the session, so you can start as many agents as you need and those past the cap start by themselves as slots free. With other sessions in the scope, or while paused, spawns over the cap are refused and the session joins the line, as before. A `task.maxConcurrency` you set stays the ceiling; the override is never saved and is cleared when the session ends. Set `agents.queueSpawns: false` to keep refusals always. See [agent slots](docs/agent-slots.md#spawns-wait-their-turn).
+- `coord_status` and `/coord` say whether this session's spawns wait in omp's queue right now, and if not, why (another session, paused, or every slot taken by agents outside the queue).
+
 ### Fixed
 
 - With `tagAgentCommands` on, a command that already starts with `export OMP_COORD_AGENT=…;` (an agent repeating an earlier, rewritten call it saw in the conversation) gets exactly one prefix for the agent running it, instead of one more each time.

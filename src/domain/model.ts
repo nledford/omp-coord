@@ -22,6 +22,8 @@ export interface AgentPolicy {
   holdMs: number;
   /** How long an approved spawn may take to start its first run before its slot is given back. */
   startTimeoutMs: number;
+  /** Keep omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow, so spawns wait instead of being refused. */
+  queueSpawns: boolean;
   /** Messages one session may send per minute. */
   messagesPerMinute: number;
 }
@@ -94,6 +96,12 @@ export interface AgentSlot {
   /** `starting`: approved, first run not seen yet. `running`: in a run. */
   state: "starting" | "running";
   since: number;
+  /**
+   * Holds no place in omp's spawn queue, so `spawnAllowance` doesn't count it: started without a spawn this extension
+   * approved (revived with `write agent://…`, or running when this session joined), or a workpool worker (omp starts
+   * those outside the queue, as spawns of `invocationKind` "eval").
+   */
+  unqueued?: "revived" | "eval";
 }
 
 /** A session's place in line for a pool, after a refused spawn. */

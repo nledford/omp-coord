@@ -222,6 +222,7 @@ describe("fair-share history", () => {
         holdMs: 1,
         startTimeoutMs: 1,
         messagesPerMinute: 1,
+        queueSpawns: true,
       },
       "s",
       2,
