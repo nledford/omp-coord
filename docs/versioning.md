@@ -31,14 +31,22 @@ There are no prereleases (`-rc.1` and the like): the marketplace catalog follows
 
 ## Cutting a release
 
-From `main`, with a clean work tree, not behind `origin/main`:
+Start on `main`, with a clean work tree, not behind `origin/main`:
 
 ```sh
 just release-plan              # commits and changelog since the last release; the next version for each kind of change
-just release fix               # or feature, breaking, or an exact version such as 1.0.0
-just release-publish           # asks, then pushes main and the tag; CI checks it and creates the GitHub release
+just release fix               # or feature, breaking, or an exact version such as 1.0.0: a release-vX.Y.Z branch and commit
+just release-pr                # (on that branch) pushes it and opens its pull request; merge it once CI passes
+git switch main && git pull    # main now holds the release
+just release-publish           # asks, then tags the release on main and pushes only the tag; CI creates the GitHub release
 ```
 
-`just release` refuses an empty Unreleased section in the changelog, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs the checks, then commits `Release vX.Y.Z` and tags it, all locally. If anything fails before the commit, the files are put back. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
+`main` and the release tags are protected by repository rulesets: `main` changes only by pull request with CI passing, never by force or deletion, and a `vX.Y.Z` tag, once pushed, can't be moved or deleted. So a release reaches `main` by its own pull request, and only the tag is pushed directly. Any merge method works.
 
-The release workflow checks that the tag is on `main` and matches the version files and the changelog, runs the checks on macOS, and creates the GitHub release with the changelog entry as its notes.
+`just release` refuses an empty Unreleased section in the changelog, then creates the `release-vX.Y.Z` branch, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs the checks and commits `Release vX.Y.Z`, all locally. If anything fails, the files are put back and you stay on (or return to) `main` with no branch left. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
+
+`just release-publish` tags the commit on `main` that added the dated changelog section of the new version (the merge, squash or rebased commit), even if other pull requests merged after it, and refuses if `origin` already has that tag. A push that failed can be run again.
+
+Once the release PR is merged, marketplace installs (which follow `main`) can see the new version before the tag and the GitHub release exist, so run `just release-publish` right after merging.
+
+The release workflow checks that the tag is on `main` and matches the version files and the changelog, runs the checks on macOS, publishes the packages and creates the GitHub release with the changelog entry as its notes. If it fails for a passing reason (a registry or runner hiccup), re-run it: it skips what is already published. If the tagged code itself is broken, the version is used up (tags can't move): fix it and release the next patch version.

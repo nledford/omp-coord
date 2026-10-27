@@ -57,22 +57,50 @@ check: typecheck lint test
 release-plan:
     @bun '{{ root }}/scripts/release.ts' plan
 
-# Cut a release locally: `just release fix|feature|breaking` (or an exact X.Y.Z, e.g. 1.0.0). Bumps the version files, dates the changelog, runs the checks, commits and tags. Pushes nothing.
+# Cut a release locally: `just release fix|feature|breaking` (or an exact X.Y.Z, e.g. 1.0.0). On a new release-vX.Y.Z branch: bumps the version files, dates the changelog, runs the checks, commits. Pushes nothing; `main` changes only by pull request.
 [group('release')]
 release change:
     @bun '{{ root }}/scripts/release.ts' prepare '{{ change }}'
 
-# Publish the release at HEAD: push main and its tag; CI then creates the GitHub release.
-[confirm('Push main and the release tag to origin?')]
+# Push the release-vX.Y.Z branch `just release` made and open its pull request, with the changelog entry as the body.
+[group('release')]
+release-pr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    case "$branch" in release-v*) ;; *) echo "check out the release-vX.Y.Z branch \`just release\` made first" >&2; exit 1 ;; esac
+    tag=${branch#release-}
+    bun '{{ root }}/scripts/release.ts' verify "$tag"
+    notes=$(bun '{{ root }}/scripts/release.ts' notes "${tag#v}")
+    git push --set-upstream origin "$branch"
+    gh pr create --base main --head "$branch" --title "Release $tag" --body "$notes"
+
+# Publish the merged release: on an up-to-date main, tag the commit that brought the new version onto main (whatever came after it) and push only the tag; CI then creates the GitHub release. Safe to run again after a failed push.
+[confirm('Tag the release on main and push the tag to origin?')]
 [group('release')]
 release-publish:
     #!/usr/bin/env bash
     set -euo pipefail
     [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "check out main first: only main is published" >&2; exit 1; }
-    tag=$(git describe --exact-match --tags --match 'v*' HEAD 2>/dev/null) || { echo "HEAD is not a release commit; run \`just release <change>\` first" >&2; exit 1; }
+    git fetch --quiet origin main --tags
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "main is not at origin/main: pull first (the release PR must be merged)" >&2; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "the work tree has uncommitted changes" >&2; exit 1; }
+    version=$(bun -e 'console.log(require("{{ root }}/package.json").version)')
+    tag="v$version"
+    ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || { echo "$tag is published already (origin has the tag): run \`just release <change>\` for a new release" >&2; exit 1; }
+    # only a release commit dates the changelog section of its version: the main commit that added that heading is the
+    # release, whether the PR was merged, squashed or rebased, even if other PRs merged since, and even when the
+    # version number itself didn't change (a first release)
+    release=$(git log --first-parent -n 1 --format=%H -S"## [$version] - " origin/main -- CHANGELOG.md)
+    [ -n "$release" ] || { echo "main has no release of $version yet: merge the release PR first" >&2; exit 1; }
     bun '{{ root }}/scripts/release.ts' verify "$tag"
-    git push --atomic origin main "refs/tags/$tag"
-    echo "Pushed $tag. Release workflow: https://github.com/nledford/omp-coord/actions/workflows/release.yml"
+    if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+      [ "$(git rev-parse "$tag^{commit}")" = "$release" ] || { echo "a local $tag points elsewhere: delete it (git tag -d $tag) and run this again" >&2; exit 1; }
+    else
+      git tag --annotate "$tag" --message "omp-coord $tag" "$release"
+    fi
+    git push origin "refs/tags/$tag"
+    echo "Pushed $tag at $(git rev-parse --short "$release"). Release workflow: https://github.com/nledford/omp-coord/actions/workflows/release.yml"
 
 # Show the build and test queues of the scope found from the current folder.
 [group('use')]

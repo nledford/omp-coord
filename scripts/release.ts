@@ -4,7 +4,8 @@
  *
  *   bun scripts/release.ts plan                       what would be released, and the next version per kind of change
  *   bun scripts/release.ts prepare <breaking|feature|fix|X.Y.Z>
- *                                                     set the version, date the changelog, check, commit, tag (local only)
+ *                                                     on a new release-vX.Y.Z branch: set the version, date the changelog,
+ *                                                     check, commit (local only; `main` changes only by pull request)
  *   bun scripts/release.ts verify [vX.Y.Z]            the version files agree (and match the tag, with its changelog entry)
  *   bun scripts/release.ts notes <X.Y.Z>              the changelog entry of a version, for the GitHub release
  *
@@ -200,7 +201,10 @@ async function prepare(arg: string | undefined): Promise<void> {
   const version = formatVersion(next);
   const tag = `v${version}`;
   if (await git("tag", "--list", tag)) throw new Error(`tag ${tag} already exists`);
+  const branch = `release-${tag}`;
+  if (await git("branch", "--list", branch)) throw new Error(`branch ${branch} already exists`);
 
+  // everything that can refuse (an empty Unreleased section, a version mismatch) runs before the branch exists
   const date = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
   const changelog = cutChangelog(read(FILES.changelog), version, date, last && formatVersion(last));
   const files: Record<string, string> = { [FILES.changelog]: changelog };
@@ -208,6 +212,9 @@ async function prepare(arg: string | undefined): Promise<void> {
     files[FILES.pkg] = setJsonVersion(read(FILES.pkg), current, version);
     files[FILES.catalog] = setJsonVersion(read(FILES.catalog), current, version);
   }
+  // `main` is protected (pull requests only): the release commit goes on its own branch and reaches `main` by a PR.
+  // The new branch starts at main's commit, so switching leaves the work tree as it is.
+  await git("switch", "--quiet", "--create", branch);
   for (const [file, text] of Object.entries(files)) writeFileSync(join(ROOT, file), text);
 
   try {
@@ -217,23 +224,18 @@ async function prepare(arg: string | undefined): Promise<void> {
     await git("commit", "--quiet", "-m", `Release ${tag}`, "--", ...Object.keys(files));
   } catch (error) {
     await git("checkout", "--", ...Object.keys(files));
+    await git("switch", "--quiet", "main");
+    await git("branch", "--delete", branch);
     throw new Error(
-      `${error instanceof Error ? error.message : String(error)}; the version files are back as they were`,
+      `${error instanceof Error ? error.message : String(error)}; the version files are back as they were, on main`,
     );
   }
-  try {
-    await git("tag", "--annotate", tag, "--message", `omp-coord ${tag}`);
-  } catch (error) {
-    throw new Error(
-      `committed Release ${tag} but could not tag it (${error instanceof Error ? error.message : String(error)}). ` +
-        `Fix that, then run: git tag --annotate ${tag} --message "omp-coord ${tag}"`,
-    );
-  }
-  console.log(`\nCommitted and tagged ${tag} locally. Nothing is pushed.`);
+  console.log(`\nCommitted Release ${tag} on branch ${branch}. Nothing is pushed.`);
   console.log(
-    "Review with `git show`, then publish with `just release-publish` (pushes main and the tag; CI creates the GitHub release).",
+    "Review with `git show`, then `just release-pr` (pushes the branch and opens the pull request). Once it is merged, " +
+      "`just release-publish` on an up-to-date main tags it and pushes the tag; CI creates the GitHub release.",
   );
-  console.log(`To undo before publishing: git tag -d ${tag} && git reset --hard HEAD~1`);
+  console.log(`To undo before pushing: git switch main && git branch -D ${branch}`);
 }
 
 if (import.meta.main) {
