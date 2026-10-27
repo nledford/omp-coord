@@ -7,7 +7,7 @@
       "name": "omp-coord",
       "source": "./",
       "description": "Shared subagent caps, build and test queues, claims, pause, a decision log and messages across omp sessions working in one project on one machine.",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "author": { "name": "Nathaniel Ledford" },
       "homepage": "https://github.com/nledford/omp-coord",
       "repository": "https://github.com/nledford/omp-coord",
