@@ -61,7 +61,7 @@ Every time is milliseconds since the epoch (`Date.now()`); a session is its lett
 | `line[]` | Sessions waiting for a slot: `pool`, `session`, `position` (from 1), `since`, `heldUntil` (`null` unless a freed slot is held for it). |
 | `agents[]` | One per agent holding a slot, by session letter then `since`: `id` (`null` for a spawn with no key and no first run yet), `type`, `parent` (`Main` or an agent id), `session`, `pool` (`null`: outside the caps), `state` (`starting` or `running`), `since`. |
 | `claims[]` | `kind` (`branch`, `worktree`, `pr`), `target`, `session`, `agent`, `note`, `since`. |
-| `queues[]` | `name`, `order`, `slots` (now), `configuredSlots`, `running[]` and `waiting[]` (in the order they will start), each job: `id`, `session`, `owner` (the owning session's id, or `null` outside omp), `lane`, `priority`, `key` (or `null`), `command`, `state`, `queuedAt`, `startedAt` (`null` while waiting), `position` (from 1 while waiting, `null` while running). |
+| `queues[]` | `name`, `order`, `slots` (now), `configuredSlots`, `running[]` and `waiting[]` (in the order they will start), each job: `id`, `session`, `owner` (the owning session's id, or `null` outside omp), `lane`, `priority`, `key` (or `null`), `command`, `agent` (omp's id of the agent whose command queued it, `"Main"` for the main agent; `null` outside omp or when an older omp-coord queued it), `state`, `queuedAt`, `startedAt` (`null` while waiting), `position` (from 1 while waiting, `null` while running). |
 | `notes[]` | The latest three decisions, oldest first: `id`, `at`, `session` (the letter when it was written, kept after that session ends; `null` outside omp), `author`, `text`. |
 
 ```json

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type CommandRule, decideCommand } from "../src/domain/commands.ts";
+import { type CommandRule, decideCommand, withAgent } from "../src/domain/commands.ts";
 
 const rules: CommandRule[] = [
   { pattern: /(^|[;&|(\s])pkill\b/, action: "refuse", reason: "stop only your own process" },
@@ -68,5 +68,13 @@ describe("agents' bash commands", () => {
     const command = d.kind === "queue" ? d.command.slice(d.command.indexOf(" -- ") + 4) : "";
     const out = await Bun.$`sh -c ${command}`.text();
     expect(out).toBe("IT'S 3\n");
+  });
+});
+
+describe("the agent behind a command", () => {
+  test("every command of a compound line sees the agent's id, quoted however it is spelled", async () => {
+    const line = withAgent("Wave'Import", "echo one $OMP_COORD_AGENT; sh -c 'echo two $OMP_COORD_AGENT'");
+    const out = Bun.spawnSync(["bash", "-c", line], { env: {} });
+    expect(out.stdout.toString()).toBe("one Wave'Import\ntwo Wave'Import\n");
   });
 });

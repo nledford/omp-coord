@@ -77,6 +77,7 @@ CREATE TABLE jobs (
   priority   INTEGER NOT NULL,
   key        TEXT,
   command    TEXT NOT NULL,
+  agent      TEXT,
   socket     TEXT NOT NULL,
   pid        INTEGER NOT NULL,
   state      TEXT NOT NULL CHECK (state IN ('waiting', 'running', 'superseded')),
@@ -229,7 +230,10 @@ export class BoardStore implements BoardRepository {
 
   #migrate(): void {
     const version = this.#db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
-    if (version === SCHEMA_VERSION) return;
+    if (version === SCHEMA_VERSION) {
+      this.#addColumns();
+      return;
+    }
     if (version !== 0) {
       throw new Error(
         `the board database has schema ${version}, but this omp-coord reads schema ${SCHEMA_VERSION}; update omp-coord`,
@@ -237,6 +241,20 @@ export class BoardStore implements BoardRepository {
     }
     this.#db.exec(SCHEMA);
     this.#db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  }
+
+  /**
+   * Nullable columns added after schema 1 was released, without a version bump: a board made by an older omp-coord
+   * gets them here, and an older omp-coord still running (an omp session not yet restarted) keeps reading and
+   * writing the board, ignoring them (its saves write null there, which readers show as unknown).
+   */
+  #addColumns(): void {
+    const has = (table: string, column: string) =>
+      this.#db
+        .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+        .all()
+        .some(c => c.name === column);
+    if (!has("jobs", "agent")) this.#db.exec("ALTER TABLE jobs ADD COLUMN agent TEXT");
   }
 
   #maybePruneEvents(now: number): void {
@@ -337,6 +355,7 @@ export class BoardStore implements BoardRepository {
             priority: number;
             key: string | null;
             command: string;
+            agent: string | null;
             socket: string;
             pid: number;
             state: "waiting" | "running" | "superseded";
@@ -354,6 +373,7 @@ export class BoardStore implements BoardRepository {
           priority: r.priority,
           key: r.key ?? undefined,
           command: r.command,
+          agent: r.agent ?? undefined,
           socket: r.socket,
           pid: r.pid,
           state: r.state,
@@ -455,7 +475,7 @@ export class BoardStore implements BoardRepository {
     const sent = db.query("INSERT INTO sent (session_id, at) VALUES (?, ?)");
     for (const x of board.sent) sent.run(x.sessionId, x.at);
     const job = db.query(
-      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, agent, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const j of board.jobs) {
       job.run(
@@ -466,6 +486,7 @@ export class BoardStore implements BoardRepository {
         j.priority,
         j.key ?? null,
         j.command,
+        j.agent ?? null,
         j.socket,
         j.pid,
         j.state,

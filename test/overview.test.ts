@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatAgents } from "../src/adapters/text/report.ts";
+import { formatAgents, formatQueues } from "../src/adapters/text/report.ts";
 import { parseConfig } from "../src/config.ts";
 import { agentEnded, agentStarted, requestSpawn } from "../src/domain/agents.ts";
 import { claim } from "../src/domain/claims.ts";
@@ -166,7 +166,7 @@ describe("status view", () => {
         owner,
         lane,
         priority: id === "j3" ? 4 : 0,
-        ...(id === "j1" ? { key: "w ci" } : {}),
+        ...(id === "j1" ? { key: "w ci", agent: "Fixer" } : {}),
         command: `cargo ${id}`,
         socket: `/s/${id}`,
         pid: 9,
@@ -239,6 +239,7 @@ describe("status view", () => {
               priority: 0,
               key: "w ci",
               command: "cargo j1",
+              agent: "Fixer",
               state: "running",
               queuedAt: 8 * MIN,
               startedAt: 8 * MIN,
@@ -254,6 +255,7 @@ describe("status view", () => {
               priority: 4,
               key: null,
               command: "cargo j3",
+              agent: null,
               state: "waiting",
               queuedAt: 10 * MIN,
               startedAt: null,
@@ -267,6 +269,7 @@ describe("status view", () => {
               priority: 0,
               key: null,
               command: "cargo j2",
+              agent: null,
               state: "waiting",
               queuedAt: 9 * MIN,
               startedAt: null,
@@ -383,5 +386,30 @@ describe("status view: ports, held slots and load", () => {
     expect(view.load).toBe(5);
     expect(view.pools).toEqual([{ name: "work", used: 1, cap: 1, configuredCap: 2 }]);
     expect(view.queues[0]).toMatchObject({ slots: 1, configuredSlots: 2 });
+  });
+});
+
+describe("queue lines", () => {
+  test("a job reads as its session and agent and its key; one without them as the session and its command", () => {
+    const board = emptyBoard();
+    join(board, "a");
+    const enqueue = (id: string, extra: object, now: number) =>
+      enqueueJob(board, config.queues, {
+        id,
+        queue: "heavy",
+        owner: "a",
+        priority: 0,
+        command: `/home/u/.cache/tools/0123abcd/scripts/ci.sh ${id}`,
+        socket: `/s/${id}`,
+        pid: 9,
+        now,
+        ...extra,
+      });
+    enqueue("j1", { key: "rebase-2204 ci", agent: "WaveUIPanels" }, MIN);
+    enqueue("j2", {}, 2 * MIN);
+    const lines = formatQueues(board, config.queues, 3 * MIN);
+    expect(lines.find(l => l.includes("j1"))).toMatch(/session A\/WaveUIPanels\s.*\srebase-2204 ci$/);
+    expect(lines.find(l => l.includes("j1"))).not.toContain("scripts/ci.sh");
+    expect(lines.find(l => l.includes("j2"))).toMatch(/session A\s.*scripts\/ci\.sh j2$/);
   });
 });

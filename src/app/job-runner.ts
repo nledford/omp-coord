@@ -17,6 +17,8 @@ export interface JobSpec {
   id: string;
   queue: string;
   owner: string | null;
+  /** omp's id of the agent whose command this is, for display. */
+  agent?: string;
   lane?: string;
   priority: number;
   key?: string;

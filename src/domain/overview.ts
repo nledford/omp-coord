@@ -51,6 +51,8 @@ export interface JobView {
   priority: number;
   key: string | null;
   command: string;
+  /** omp's id of the agent whose command queued it ("Main" for the main agent); null outside omp or when not recorded. */
+  agent: string | null;
   state: "running" | "waiting";
   /** When it joined the line (a superseding job keeps the place of the one it replaced). */
   queuedAt: number;
@@ -136,6 +138,7 @@ export function statusView(board: Board, config: ScopeConfig, now: number): Stat
     priority: j.priority,
     key: j.key ?? null,
     command: j.command,
+    agent: j.agent ?? null,
     state: position === null ? "running" : "waiting",
     queuedAt: j.since,
     startedAt: j.startedAt ?? null,

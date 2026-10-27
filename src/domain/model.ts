@@ -158,6 +158,9 @@ export interface Job {
   queue: string;
   /** The omp session whose agent started it, or null (a terminal, a script). Fair share is per owner. */
   owner: string | null;
+  /** omp's id of the agent whose command queued it ("Main" for the main agent), or undefined (outside omp, or an
+   * older omp-coord that did not record it). For display only. */
+  agent: string | undefined;
   lane: string;
   priority: number;
   /** Jobs with the same key are duplicates (e.g. "<checkout> ci"). */

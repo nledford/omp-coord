@@ -43,6 +43,7 @@ export interface JobRequest {
   id: string;
   queue: string;
   owner: string | null;
+  agent?: string;
   lane?: string;
   priority: number;
   key?: string;
@@ -81,6 +82,7 @@ export function enqueueJob(board: Board, queues: Queues, req: JobRequest): Enque
     id: req.id,
     queue: req.queue,
     owner: req.owner,
+    agent: req.agent,
     lane,
     priority: req.priority,
     key: req.key,
@@ -97,6 +99,7 @@ export function enqueueJob(board: Board, queues: Queues, req: JobRequest): Enque
     lane,
     priority: req.priority,
     ...(req.key === undefined ? {} : { key: req.key }),
+    ...(req.agent === undefined ? {} : { agent: req.agent }),
   });
   schedule(board, queues, req.now);
   return { ok: true };

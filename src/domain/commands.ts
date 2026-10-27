@@ -54,3 +54,12 @@ export function decideCommand(rules: CommandRule[], command: string, runner: Run
 function quote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
+
+/**
+ * The command with the id of the agent running it exported first, so a queued job records whose it is
+ * (`omp-coord run` reads `OMP_COORD_AGENT`). An export, not a `VAR=… cmd` prefix, so it reaches every command of a
+ * compound line; each agent's next command sets it again.
+ */
+export function withAgent(agentId: string, command: string): string {
+  return `export OMP_COORD_AGENT=${quote(agentId)}; ${command}`;
+}
