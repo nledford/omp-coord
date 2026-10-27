@@ -20,6 +20,7 @@ const policy: AgentPolicy = {
   holdMs: 5 * MIN,
   startTimeoutMs: MIN,
   messagesPerMinute: 10,
+  queueSpawns: true,
 };
 const queues: Record<string, QueuePolicy> = {
   heavy: {

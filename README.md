@@ -7,7 +7,7 @@
 
 An [omp](https://github.com/can1357/oh-my-pi) plugin, plus a small command-line runner, that lets several omp sessions on one machine, working in the same project, share one set of agent caps and build/test queues, and talk to each other.
 
-- **Shared agent caps.** Subagents count against pools (for example 8 `work` and 2 `short` slots) shared by every session in the project. A spawn over the cap is refused through omp's spawn check, so the cap does not depend on agents remembering to take and free slots.
+- **Shared agent caps.** Subagents count against pools (for example 8 `work` and 2 `short` slots) shared by every session in the project. Spawns past the cap wait in omp's own queue and start by themselves as slots free; one that still reaches omp's spawn check over the cap is refused. The cap does not depend on agents remembering to take and free slots.
 - **A fair line.** A refused session joins the line; the next free slot is held for it, and it is told so.
 - **Subagents start only reviewers.** "No nested worker agents" is enforced rather than asked for.
 - **Build and test queues.** `omp-coord run <queue> -- <command>` waits for one of the queue's slots, then runs the command, within an optional time limit. Agents' matching bash commands are rewritten to go through it.

@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- Spawns wait their turn (`agents.queueSpawns`, on by default): the extension keeps omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow the session now, so you can start as many agents as you need and those past the cap start by themselves as slots free, instead of being refused and started again. A `task.maxConcurrency` you set stays the ceiling; the override is never saved and is cleared when the session ends. A slot another session frees is taken up at this session's next agent start or end. See [agent slots](docs/agent-slots.md#spawns-wait-their-turn).
+
 ### Fixed
 
 - With `tagAgentCommands` on, a command that already starts with `export OMP_COORD_AGENT=…;` (an agent repeating an earlier, rewritten call it saw in the conversation) gets exactly one prefix for the agent running it, instead of one more each time.

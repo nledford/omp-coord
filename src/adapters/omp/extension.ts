@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
+import { spawnAllowance } from "../../domain/agents.ts";
 import { decideCommand, withAgent, withoutAgentExports } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
@@ -31,6 +32,7 @@ import {
 } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
+import { loadSettingHandle, type SpawnQueue, spawnQueue } from "./spawn-queue.ts";
 
 /**
  * How agents' queued commands start the runner: the omp binary itself runs the CLI adapter as Bun
@@ -60,6 +62,8 @@ interface Runtime {
   ticks: number;
   footer: string | undefined;
   pruning: boolean;
+  /** Drives omp's spawn queue (`agents.queueSpawns`); undefined when off or unavailable. */
+  queue: SpawnQueue | undefined;
 }
 
 interface Shared {
@@ -113,6 +117,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         agentType: event.agent.toLowerCase(),
         ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
       });
+      refreshQueue(rt);
       if (decision.allowed) return undefined;
       notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
       return { block: true, reason: `omp-coord: ${decision.reason}` };
@@ -139,6 +144,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         parentIsSubagent: parentId !== "Main",
         agentType: ctx.agent.name.toLowerCase(),
       });
+      refreshQueue(rt);
       if (count && count.used > count.cap) {
         notify(
           rt,
@@ -152,9 +158,10 @@ export default function ompCoord(pi: ExtensionAPI): void {
   pi.on("agent_end", (_event, ctx) => {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
-    guarded(rt, "free an agent slot", () =>
-      rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id }),
-    );
+    guarded(rt, "free an agent slot", () => {
+      rt.coordinator.agentEnded({ sessionId: rt.sessionId, agentId: ctx.agent.id });
+      refreshQueue(rt);
+    });
   });
 
   pi.on("tool_call", (event, ctx) => {
@@ -449,7 +456,18 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  const rt: Runtime = { config, ...joined, pi, ctx, timer: undefined, ticks: 0, footer: undefined, pruning: false };
+  const queue = config.agents.queueSpawns ? spawnQueue(await loadSettingHandle(), pi.pi?.settings) : undefined;
+  const rt: Runtime = {
+    config,
+    ...joined,
+    pi,
+    ctx,
+    timer: undefined,
+    ticks: 0,
+    footer: undefined,
+    pruning: false,
+    queue,
+  };
   shared.runtime = rt;
   // Commands this session's agents run (e.g. a `just` recipe calling `omp-coord run`) see these.
   process.env.OMP_COORD_SESSION = rt.sessionId;
@@ -458,6 +476,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const scratch = scratchFor(rt);
   if (scratch) process.env.OMP_COORD_SCRATCH = scratch;
   rt.timer = ctx.setInterval(() => tick(rt), TICK_MS);
+  refreshQueue(rt);
   await prune(rt);
 
   const board = rt.coordinator.board();
@@ -524,8 +543,15 @@ function scratchFor(rt: Runtime, agentId?: string): string | undefined {
   return dir;
 }
 
+/** Sets omp's spawn queue to what the caps allow this session now (a no-op when the queue isn't driven). */
+function refreshQueue(rt: Runtime): void {
+  if (!rt.queue) return;
+  rt.queue.apply(spawnAllowance(rt.coordinator.board(), rt.config.agents, rt.sessionId, Date.now()));
+}
+
 function stop(rt: Runtime): void {
   shared.runtime = undefined;
+  rt.queue?.release();
   for (const key of ["OMP_COORD_SESSION", "OMP_COORD_PORTS", "OMP_COORD_SCRATCH"]) delete process.env[key];
   rt.ctx.clearTimer(rt.timer);
   try {
@@ -542,6 +568,7 @@ async function tick(rt: Runtime): Promise<void> {
   const now = Date.now();
   const { label, inbox, holds, board } = rt.coordinator.tick(identity(rt.sessionId, rt.ctx.cwd, rt.listener));
   rt.label = label;
+  rt.queue?.apply(spawnAllowance(board, rt.config.agents, rt.sessionId, now));
 
   for (const m of inbox) {
     const body =

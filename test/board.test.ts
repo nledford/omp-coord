@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentEnded, agentStarted, expire, requestSpawn, takeNewHolds } from "../src/domain/agents.ts";
+import { agentEnded, agentStarted, expire, requestSpawn, spawnAllowance, takeNewHolds } from "../src/domain/agents.ts";
 import { sendMessage, takeInbox } from "../src/domain/messages.ts";
 import { type AgentPolicy, type Board, emptyBoard } from "../src/domain/model.ts";
 import { registerSession, removeSession } from "../src/domain/sessions.ts";
@@ -14,6 +14,7 @@ const policy: AgentPolicy = {
   holdMs: 5 * MIN,
   startTimeoutMs: MIN,
   messagesPerMinute: 3,
+  queueSpawns: true,
 };
 
 function boardWith(...ids: string[]): Board {
@@ -440,5 +441,75 @@ describe("event log", () => {
       ["message_sent", "A", { to: ["B"], chars: 11 }],
       ["session_left", "B", {}],
     ]);
+  });
+});
+
+describe("how many of a session's own spawns may run at once (omp's spawn queue)", () => {
+  const allowance = (board: Board, session: string, now = 0) => spawnAllowance(board, policy, session, now);
+
+  test("an idle session alone may start the default pool's cap; each running agent keeps its place", () => {
+    const board = boardWith("a");
+    expect(allowance(board, "a")).toBe(2);
+    run(board, "a", "A1");
+    expect(allowance(board, "a")).toBe(2);
+    run(board, "a", "A2");
+    expect(allowance(board, "a")).toBe(2);
+  });
+
+  test("another session's agents take from the free slots, not from this session's running ones", () => {
+    const board = boardWith("a", "b");
+    run(board, "a", "A1");
+    run(board, "b", "B1");
+    expect(allowance(board, "a")).toBe(1);
+    expect(allowance(board, "b")).toBe(1);
+  });
+
+  test("with every slot taken by others it is 1, never 0, which omp reads as unlimited", () => {
+    const board = boardWith("a", "b");
+    run(board, "b", "B1");
+    run(board, "b", "B2");
+    expect(allowance(board, "a")).toBe(1);
+  });
+
+  test("a slot held for this session counts; a free slot held for another doesn't", () => {
+    const board = boardWith("a", "b");
+    run(board, "b", "B1");
+    run(board, "b", "B2");
+    expect(spawn(board, "a").allowed).toBe(false);
+    agentEnded(board, policy, { sessionId: "b", agentId: "B1", now: MIN });
+    expect(allowance(board, "a", MIN)).toBe(1);
+    expect(allowance(board, "b", MIN)).toBe(1);
+    run(board, "a", "A1", "task", MIN);
+    expect(allowance(board, "a", MIN)).toBe(1);
+  });
+
+  test("while another session waits in line, a slot that frees is not this session's to count", () => {
+    const board = boardWith("a", "b");
+    run(board, "a", "A1");
+    run(board, "a", "A2");
+    expect(spawn(board, "b").allowed).toBe(false);
+    agentEnded(board, policy, { sessionId: "a", agentId: "A2", now: MIN });
+    expect(allowance(board, "a", MIN)).toBe(1);
+  });
+
+  test("top-level reviewers hold a place too; other pools' free slots and subagents' reviewers don't add any", () => {
+    const board = boardWith("a");
+    run(board, "a", "R1", "reviewer");
+    expect(allowance(board, "a")).toBe(3);
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "R1",
+      parentIsSubagent: true,
+      agentType: "reviewer",
+      now: 0,
+    });
+    expect(allowance(board, "a")).toBe(3);
+  });
+
+  test("while paused only the running agents keep their places", () => {
+    const board = boardWith("a");
+    run(board, "a", "A1");
+    board.pause = { by: null, reason: "maintenance", since: 0 };
+    expect(allowance(board, "a")).toBe(1);
   });
 });

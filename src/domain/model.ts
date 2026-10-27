@@ -22,6 +22,8 @@ export interface AgentPolicy {
   holdMs: number;
   /** How long an approved spawn may take to start its first run before its slot is given back. */
   startTimeoutMs: number;
+  /** Keep omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow, so spawns wait instead of being refused. */
+  queueSpawns: boolean;
   /** Messages one session may send per minute. */
   messagesPerMinute: number;
 }

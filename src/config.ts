@@ -187,6 +187,7 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
       },
       holdMs: count(agents.holdMinutes ?? 5, "agents.holdMinutes", fail) * 60_000,
       startTimeoutMs: count(agents.startTimeoutSeconds ?? 120, "agents.startTimeoutSeconds", fail) * 1000,
+      queueSpawns: flag(agents.queueSpawns ?? true, "agents.queueSpawns", fail),
       messagesPerMinute: count(messages.perMinute ?? 10, "messages.perMinute", fail),
     },
     commands,

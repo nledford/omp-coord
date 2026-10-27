@@ -66,6 +66,8 @@ export interface ZodString {
 
 export interface ExtensionAPI {
   on<K extends keyof Events>(event: K, handler: Events[K]): void;
+  /** The host session; `settings` is the scope omp's typed setting handles take. */
+  pi?: { settings?: unknown };
   setLabel(label: string): void;
   registerTool<P>(tool: {
     name: string;

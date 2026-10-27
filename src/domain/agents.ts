@@ -264,3 +264,26 @@ function listOr(items: string[]): string {
   if (items.length === 1) return items[0] as string;
   return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 }
+
+/**
+ * How many of this session's own (main-agent) spawns may run at once right now, for omp's per-session spawn queue
+ * (`task.maxConcurrency`): its top-level agents already running or starting (they hold a place in that queue, inside
+ * the caps or not), each slot held for it, and the default pool's free slots. Spawns past it wait in omp's queue and
+ * start as places free, instead of reaching the spawn check and being refused. Other pools' free slots are left out:
+ * omp's queue doesn't know a waiting spawn's pool, so counting them would let a default-pool spawn through to a
+ * refusal; an agent of another pool starts when a default-pool slot is free too. At least 1, since omp reads 0 as
+ * unlimited: a session with nothing running while every slot is taken lets one spawn through to the spawn check,
+ * which refuses it and puts the session in line as before.
+ */
+export function spawnAllowance(board: Board, policy: AgentPolicy, sessionId: string, now: number): number {
+  const own = board.slots.filter(s => s.sessionId === sessionId && s.parentId === "Main").length;
+  const held = board.waitlist.filter(t => t.sessionId === sessionId && t.holdUntil !== undefined).length;
+  const pool = policy.defaultPool;
+  const waitingAhead = board.waitlist.some(
+    t => t.pool === pool && t.holdUntil === undefined && t.sessionId !== sessionId,
+  );
+  const free = waitingAhead
+    ? 0
+    : Math.max(0, capOf(board, policy, pool, now) - used(board, pool) - activeHolds(board, pool));
+  return Math.max(1, own + held + free);
+}

@@ -48,6 +48,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
 | `src/adapters/os/load.ts`, `process-group.ts` | `LoadProbe` from the 1-minute load average; whether a timed-out job's process group still has a running member (zombies do not count). |
 | `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run, and with `tagAgentCommands` starts each agent command with `export OMP_COORD_AGENT=<agent id>;`. Keeps each subagent's binding to deliver messages to it. |
+| `src/adapters/omp/spawn-queue.ts` | Drives omp's per-session spawn queue (`task.maxConcurrency`) from `spawnAllowance` through omp's settings registry, loaded at run time (absent outside omp: nothing driven). |
 | `src/adapters/cli/cli.ts` | `omp-coord` subcommands: argument parsing, signals, time limits and process spawning around the use cases; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for a queued command. |
 | `src/adapters/text/report.ts` | Text for `/coord`, the tools, the `omp-coord` subcommands and the footer. |
 
