@@ -35,10 +35,14 @@ From `main`, with a clean work tree, not behind `origin/main`:
 
 ```sh
 just release-plan              # commits and changelog since the last release; the next version for each kind of change
-just release fix               # or feature, breaking, or an exact version such as 1.0.0
-just release-publish           # asks, then pushes main and the tag; CI checks it and creates the GitHub release
+just release fix               # or feature, breaking, or an exact version such as 1.0.0: a release-vX.Y.Z branch and commit
+just release-pr                # pushes that branch and opens its pull request; merge it once CI passes
+git switch main && git pull    # main now holds the release commit
+just release-publish           # asks, then tags main and pushes only the tag; CI checks it and creates the GitHub release
 ```
 
-`just release` refuses an empty Unreleased section in the changelog, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs the checks, then commits `Release vX.Y.Z` and tags it, all locally. If anything fails before the commit, the files are put back. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
+`main` and the release tags are protected by repository rulesets: `main` changes only by pull request with CI passing, never by force or deletion, and a `vX.Y.Z` tag, once pushed, can't be moved or deleted. So a release commit reaches `main` by its own pull request, and only the tag is pushed directly.
+
+`just release` refuses an empty Unreleased section in the changelog, creates the `release-vX.Y.Z` branch, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs the checks, then commits `Release vX.Y.Z`, all locally. If anything fails before the commit, the files are put back and the branch is removed. `just release-publish` refuses unless `main` is up to date, holds that release commit, and has no tag for its version yet. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
 
 The release workflow checks that the tag is on `main` and matches the version files and the changelog, runs the checks on macOS, and creates the GitHub release with the changelog entry as its notes.
