@@ -9,7 +9,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 ### Fixed
 
 - With `tagAgentCommands` on, a command that already starts with `export OMP_COORD_AGENT=…;` (an agent repeating an earlier, rewritten call it saw in the conversation) gets exactly one prefix for the agent running it, instead of one more each time.
-- A release whose tag push GitHub delivers twice, or a release run again, no longer fails: release runs for one tag wait for each other, npm's current "already exists" (409) answer counts as already published, and a GitHub release that exists already is left as it is.
+- A release whose tag push GitHub delivers twice, or a release run again, no longer fails: release runs for one tag wait for each other, npm's current "already exists" (409) answer counts as already published once npm lists that version, and a GitHub release that exists already is left as it is.
 - With `tagAgentCommands` on, a copied prefix no longer ends up inside a queued job's own command.
 
 ## [0.2.3] - 2026-10-27

@@ -76,7 +76,7 @@ jobs:
                 fi
                 sleep 15
               done
-              echo "npm refused the publish as a conflict, but @nledford/omp-coord@$version did not appear within 10 minutes" >&2
+              echo "::error::npm refused the publish as a conflict, but @nledford/omp-coord@$version did not appear within 10 minutes"
             fi
             exit 1
           fi
