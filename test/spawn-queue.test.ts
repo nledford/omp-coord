@@ -60,7 +60,7 @@ describe("omp's spawn queue, driven by the caps", () => {
   test("without omp's setting handle or a settings scope nothing is driven", async () => {
     expect(spawnQueue(undefined, {})).toBeUndefined();
     expect(spawnQueue(fakeHandle().handle, undefined)).toBeUndefined();
-    // outside omp (these tests) the registry can't be imported: no handle, no error
-    expect(await loadSettingHandle()).toBeUndefined();
+    // outside omp (these tests) the registry can't be imported: no handle, a reason, no error
+    expect(await loadSettingHandle()).toMatch(/can't be loaded/);
   });
 });

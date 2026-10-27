@@ -64,6 +64,8 @@ interface Runtime {
   pruning: boolean;
   /** Drives omp's spawn queue (`agents.queueSpawns`); undefined when off or unavailable. */
   queue: SpawnQueue | undefined;
+  /** Whether spawns past the cap wait in omp's queue, or why not; shown in coord_status and /coord. */
+  queueNote: string;
 }
 
 interface Shared {
@@ -456,7 +458,17 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  const queue = config.agents.queueSpawns ? spawnQueue(await loadSettingHandle(), pi.pi?.settings) : undefined;
+  // whether spawns past the cap wait in omp's queue, and why not, for the session-start notice
+  let queue: SpawnQueue | undefined;
+  let queueNote = "Spawns past the cap are refused (agents.queueSpawns is off).";
+  if (config.agents.queueSpawns) {
+    const handle = await loadSettingHandle();
+    const scope = pi.pi?.settings;
+    queue = typeof handle === "string" ? undefined : spawnQueue(handle, scope);
+    queueNote = queue
+      ? "Spawns past the cap wait in omp's queue and start as slots free."
+      : `Spawns past the cap are refused: ${typeof handle === "string" ? handle : "omp gave the extension no settings scope"}.`;
+  }
   const rt: Runtime = {
     config,
     ...joined,
@@ -467,6 +479,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     footer: undefined,
     pruning: false,
     queue,
+    queueNote,
   };
   shared.runtime = rt;
   // Commands this session's agents run (e.g. a `just` recipe calling `omp-coord run`) see these.
@@ -489,7 +502,8 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
       (others.length
         ? `Other sessions: ${others.map(s => `${s.label} (${s.cwd})`).join(", ")}. Agent caps are shared with them.`
         : "No other session is active.") +
-      pausedNote,
+      pausedNote +
+      ` ${queueNote}`,
     "info",
   );
   if (differing.length) {
@@ -617,7 +631,7 @@ function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
 }
 
 function statusText(rt: Runtime): string {
-  return formatStatus(rt.coordinator.board(), rt.config, rt.sessionId, Date.now());
+  return `${formatStatus(rt.coordinator.board(), rt.config, rt.sessionId, Date.now())}\n${rt.queueNote}`;
 }
 
 function deliver(binding: ExtensionAPI, content: string): void {

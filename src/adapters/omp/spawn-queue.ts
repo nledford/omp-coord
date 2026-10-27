@@ -28,8 +28,6 @@ export interface SpawnQueue {
 }
 
 export const SETTING_ID = "task.maxConcurrency";
-/** omp's settings registry, imported by name at run time (a constant, so the compiler doesn't look for it). */
-const REGISTRY: string = "@oh-my-pi/pi-coding-agent/config/registry";
 
 /** A queue driver over `handle` in `scope`; `undefined` when either is missing. */
 export function spawnQueue(handle: SettingHandle | undefined, scope: unknown): SpawnQueue | undefined {
@@ -54,16 +52,18 @@ export function spawnQueue(handle: SettingHandle | undefined, scope: unknown): S
   };
 }
 
-/** omp's handle for the setting, or `undefined` when this omp has no settings registry to load it from. */
-export async function loadSettingHandle(): Promise<SettingHandle | undefined> {
+/** omp's handle for the setting, or why there is none (this omp has no settings registry to load it from). */
+export async function loadSettingHandle(): Promise<SettingHandle | string> {
   try {
     // Dynamic on purpose: the host's registry exists only inside an omp that has it. A static import would fail the
-    // whole extension's load in an older omp, in the CLI and in tests, where this module is loaded without omp.
-    const registry = (await import(REGISTRY)) as {
-      lookup?: (id: string) => SettingHandle | undefined;
-    };
-    return registry.lookup?.(SETTING_ID);
-  } catch {
-    return undefined;
+    // whole extension's load in an older omp, in the CLI and in tests, where this module is loaded without omp. The
+    // specifier stays a literal: omp maps host packages onto its bundled copies by rewriting the specifiers in an
+    // extension's source as it loads it, and a specifier held in a variable is missed (seen live: "Cannot find package").
+    const registry: { lookup?: (id: string) => SettingHandle | undefined } = await import(
+      "@oh-my-pi/pi-coding-agent/config/registry"
+    );
+    return registry.lookup?.(SETTING_ID) ?? `omp's settings registry has no ${SETTING_ID}`;
+  } catch (error) {
+    return `omp's settings registry can't be loaded (${error instanceof Error ? error.message : String(error)})`;
   }
 }
