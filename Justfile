@@ -70,13 +70,13 @@ release-pr:
     branch=$(git rev-parse --abbrev-ref HEAD)
     case "$branch" in release-v*) ;; *) echo "check out the release-vX.Y.Z branch \`just release\` made first" >&2; exit 1 ;; esac
     tag=${branch#release-}
-    bun '{{ root }}/scripts/release.ts' verify
+    bun '{{ root }}/scripts/release.ts' verify "$tag"
     notes=$(bun '{{ root }}/scripts/release.ts' notes "${tag#v}")
     git push --set-upstream origin "$branch"
     gh pr create --base main --head "$branch" --title "Release $tag" --body "$notes"
 
-# Publish the merged release: on an up-to-date main whose version has no tag yet, tag main's head and push only the tag; CI then creates the GitHub release.
-[confirm('Tag main and push the release tag to origin?')]
+# Publish the merged release: on an up-to-date main, tag the commit that brought the new version onto main (whatever came after it) and push only the tag; CI then creates the GitHub release. Safe to run again after a failed push.
+[confirm('Tag the release on main and push the tag to origin?')]
 [group('release')]
 release-publish:
     #!/usr/bin/env bash
@@ -85,14 +85,21 @@ release-publish:
     git fetch --quiet origin main --tags
     [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "main is not at origin/main: pull first (the release PR must be merged)" >&2; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "the work tree has uncommitted changes" >&2; exit 1; }
-    tag="v$(bun -e 'console.log(require("{{ root }}/package.json").version)')"
-    ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "$tag is tagged already: nothing to publish (run \`just release <change>\` for a new one)" >&2; exit 1; }
-    # grep reads all of git log's output (no -q): under pipefail, an early exit would kill git log and read as "absent"
-    git log --format=%s -n 50 origin/main | grep -x "Release $tag" >/dev/null || { echo "main holds no \"Release $tag\" commit: merge the release PR first" >&2; exit 1; }
+    version=$(bun -e 'console.log(require("{{ root }}/package.json").version)')
+    tag="v$version"
+    ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || { echo "$tag is published already (origin has the tag): run \`just release <change>\` for a new release" >&2; exit 1; }
+    # the version changes only in release commits: the main commit where package.json took it is the release, whether
+    # the PR was merged, squashed or rebased, and even if other PRs merged since
+    release=$(git log --first-parent -n 1 --format=%H -S"\"version\": \"$version\"" origin/main -- package.json)
+    [ -n "$release" ] || { echo "main never took version $version: merge the release PR first" >&2; exit 1; }
     bun '{{ root }}/scripts/release.ts' verify "$tag"
-    git tag --annotate "$tag" --message "omp-coord $tag"
+    if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+      [ "$(git rev-parse "$tag^{commit}")" = "$release" ] || { echo "a local $tag points elsewhere: delete it (git tag -d $tag) and run this again" >&2; exit 1; }
+    else
+      git tag --annotate "$tag" --message "omp-coord $tag" "$release"
+    fi
     git push origin "refs/tags/$tag"
-    echo "Pushed $tag. Release workflow: https://github.com/nledford/omp-coord/actions/workflows/release.yml"
+    echo "Pushed $tag at $(git rev-parse --short "$release"). Release workflow: https://github.com/nledford/omp-coord/actions/workflows/release.yml"
 
 # Show the build and test queues of the scope found from the current folder.
 [group('use')]

@@ -203,9 +203,8 @@ async function prepare(arg: string | undefined): Promise<void> {
   if (await git("tag", "--list", tag)) throw new Error(`tag ${tag} already exists`);
   const branch = `release-${tag}`;
   if (await git("branch", "--list", branch)) throw new Error(`branch ${branch} already exists`);
-  // `main` is protected (pull requests only): the release commit goes on its own branch and reaches `main` by a PR
-  await git("switch", "--quiet", "--create", branch);
 
+  // everything that can refuse (an empty Unreleased section, a version mismatch) runs before the branch exists
   const date = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
   const changelog = cutChangelog(read(FILES.changelog), version, date, last && formatVersion(last));
   const files: Record<string, string> = { [FILES.changelog]: changelog };
@@ -213,6 +212,9 @@ async function prepare(arg: string | undefined): Promise<void> {
     files[FILES.pkg] = setJsonVersion(read(FILES.pkg), current, version);
     files[FILES.catalog] = setJsonVersion(read(FILES.catalog), current, version);
   }
+  // `main` is protected (pull requests only): the release commit goes on its own branch and reaches `main` by a PR.
+  // The new branch starts at main's commit, so switching leaves the work tree as it is.
+  await git("switch", "--quiet", "--create", branch);
   for (const [file, text] of Object.entries(files)) writeFileSync(join(ROOT, file), text);
 
   try {
