@@ -61,5 +61,12 @@ function quote(word: string): string {
  * compound line; each agent's next command sets it again.
  */
 export function withAgent(agentId: string, command: string): string {
-  return `export OMP_COORD_AGENT=${quote(agentId)}; ${command}`;
+  return `export OMP_COORD_AGENT=${quote(agentId)}; ${command.replace(LEADING_AGENT_EXPORTS, "")}`;
 }
+
+/**
+ * The `export OMP_COORD_AGENT=…;` prefixes already at the start of a command. The rewritten command is what the
+ * conversation shows, so an agent that copies its earlier calls sends them back; without stripping, each call would
+ * add one more. A value is a bare word or single-quoted as `quote` writes it (`'\''` for a quote inside).
+ */
+const LEADING_AGENT_EXPORTS = /^(?:\s*export\s+OMP_COORD_AGENT=(?:'(?:[^']|'\\'')*'|[^\s;'"]+)\s*;)+\s*/;

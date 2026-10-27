@@ -6,6 +6,11 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- With `tagAgentCommands` on, a command that already starts with `export OMP_COORD_AGENT=…;` (an agent repeating an earlier, rewritten call it saw in the conversation) gets exactly one prefix for the agent running it, instead of one more each time.
+- A release whose tag push GitHub delivers twice no longer fails one of its two runs: release runs for one tag wait for each other, and the second finds the version published.
+
 ## [0.2.3] - 2026-10-27
 
 ### Added

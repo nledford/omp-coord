@@ -13,6 +13,13 @@ on:
 permissions:
   contents: read
 
+# One release run per tag at a time. GitHub once delivered the v0.2.2 tag push twice in the same second: both runs got
+# past "unless this version is there already" before either published, and the second failed on npm's 409. Queued
+# (not canceled), the second run finds the version published and skips.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: macos-latest

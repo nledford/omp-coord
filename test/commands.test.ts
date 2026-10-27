@@ -77,4 +77,18 @@ describe("the agent behind a command", () => {
     const out = Bun.spawnSync(["bash", "-c", line], { env: {} });
     expect(out.stdout.toString()).toBe("one Wave'Import\ntwo Wave'Import\n");
   });
+
+  test("a command that already starts with the prefix, once or many times, gets exactly one, for its own agent", () => {
+    const once = withAgent("Main", "just ci");
+    expect(withAgent("Main", once)).toBe(once);
+    const piled = `export OMP_COORD_AGENT='Main'; export OMP_COORD_AGENT=Main;  ${withAgent("Wave'Import", "true")}`;
+    expect(withAgent("Fixer", piled)).toBe(withAgent("Fixer", "true"));
+  });
+
+  test("an export of the variable later in a command, or of another variable first, is the command's own", () => {
+    const later = "cd w && export OMP_COORD_AGENT=x; just ci";
+    expect(withAgent("Main", later)).toBe(`export OMP_COORD_AGENT='Main'; ${later}`);
+    const other = "export OMP_COORD_AGENT_X=1; true";
+    expect(withAgent("Main", other)).toBe(`export OMP_COORD_AGENT='Main'; ${other}`);
+  });
 });
