@@ -66,6 +66,8 @@ interface Runtime {
   queue: SpawnQueue | undefined;
   /** Whether spawns past the cap wait in omp's queue, or why not; shown in coord_status and /coord. */
   queueNote: string;
+  /** Agents first started by an eval spawn (workpool workers): their later runs are marked "eval" too. */
+  evalAgents: Set<string>;
 }
 
 interface Shared {
@@ -126,6 +128,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
         ...(event.invocationKind === undefined ? {} : { invocationKind: event.invocationKind }),
       });
+      if (event.invocationKind === "eval" && event.spawnKey !== undefined) rt.evalAgents.add(event.spawnKey);
     } catch (error) {
       // The cap is a shared agreement, not a security boundary: a broken board must not stop all work.
       notify(
@@ -153,6 +156,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         parentId,
         parentIsSubagent: parentId !== "Main",
         agentType: ctx.agent.name.toLowerCase(),
+        evalWorker: rt.evalAgents.has(ctx.agent.id),
       });
       refreshQueue(rt);
       if (count && count.used > count.cap) {
@@ -446,6 +450,8 @@ export default function ompCoord(pi: ExtensionAPI): void {
 }
 
 async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+  // a binding started again after an earlier shutdown starts fresh
+  shared.shutDown.delete(pi);
   const configPath = findConfigFile(ctx.cwd);
   if (!configPath) return;
   let config: Config;
@@ -490,6 +496,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     pruning: false,
     queue,
     queueNote,
+    evalAgents: new Set(),
   };
   shared.runtime = rt;
   // Commands this session's agents run (e.g. a `just` recipe calling `omp-coord run`) see these.

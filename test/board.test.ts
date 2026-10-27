@@ -503,6 +503,39 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
     expect(allowance(board, "a", 1)).toBe(2);
   });
 
+  test("a workpool worker's later run (no spawn check) is marked eval too, so the queue stays undriven while it works", () => {
+    const board = boardWith("a");
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "W1",
+      invocationKind: "eval",
+      now: 0,
+    });
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "W1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      now: 0,
+    });
+    agentEnded(board, policy, { sessionId: "a", agentId: "W1", now: 1 });
+    expect(allowance(board, "a", 1)).toBe(2);
+    agentStarted(board, policy, {
+      sessionId: "a",
+      agentId: "W1",
+      parentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      evalWorker: true,
+      now: 2,
+    });
+    expect(allowance(board, "a", 2)).toBeUndefined();
+  });
+
   test("with every slot taken by agents outside omp's queue it isn't driven, rather than let spawns through one by one", () => {
     const board = boardWith("a");
     for (const id of ["Old1", "Old2"])

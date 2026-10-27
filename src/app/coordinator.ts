@@ -158,6 +158,7 @@ export class Coordinator {
     parentId: string;
     parentIsSubagent: boolean;
     agentType: string;
+    evalWorker?: boolean;
   }) {
     return this.repo.transact(b => agentStarted(b, this.config.agents, { ...a, now: this.clock.now() }));
   }

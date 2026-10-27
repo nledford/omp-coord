@@ -149,6 +149,11 @@ export function agentStarted(
     parentId: string;
     parentIsSubagent: boolean;
     agentType: string;
+    /**
+     * A workpool worker's later run (its first run was an eval spawn): omp runs it outside the spawn check and the
+     * spawn queue, so its new slot is marked "eval", not "revived".
+     */
+    evalWorker?: boolean;
     now: number;
   },
 ): { pool: string; used: number; cap: number } | null {
@@ -188,7 +193,7 @@ export function agentStarted(
       pool: a.parentIsSubagent ? null : poolFor(policy, a.agentType),
       state: "running",
       since: a.now,
-      unqueued: "revived",
+      unqueued: a.evalWorker ? "eval" : "revived",
     };
     board.slots.push(slot);
   }
