@@ -9,10 +9,17 @@ function scope(queues: Record<string, unknown>) {
   const root = mkdtempSync(join(tmpdir(), "omp-coord-cli-"));
   mkdirSync(join(root, "state"));
   writeFileSync(join(root, ".omp-coord.json"), JSON.stringify({ scope: "cli", queues }));
-  const env = { ...process.env, OMP_COORD_STATE_DIR: join(root, "state"), OMP_COORD_SESSION: "" };
-  const run = (...args: string[]) =>
-    Bun.spawn(["bun", CLI, ...args], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
-  return { root, run };
+  // no session or agent of the omp running these tests leaks into the jobs
+  const env = { ...process.env, OMP_COORD_STATE_DIR: join(root, "state"), OMP_COORD_SESSION: "", OMP_COORD_AGENT: "" };
+  const runAs = (agent: string, ...args: string[]) =>
+    Bun.spawn(["bun", CLI, ...args], {
+      cwd: root,
+      env: { ...env, OMP_COORD_AGENT: agent },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  const run = (...args: string[]) => runAs("", ...args);
+  return { root, run, runAs };
 }
 
 /** Resolves once `file` exists, i.e. the command that writes it has started. */
@@ -173,8 +180,9 @@ describe("omp-coord status --json and --agents", () => {
   });
 
   test("--json lists a running and a waiting job with their fields", async () => {
-    const { root, run } = scope({ heavy: { slots: 1 } });
-    const first = run(
+    const { root, run, runAs } = scope({ heavy: { slots: 1 } });
+    const first = runAs(
+      "Tester",
       "run",
       "heavy",
       "--key",
@@ -199,10 +207,19 @@ describe("omp-coord status --json and --agents", () => {
     writeFileSync(join(root, "go"), "");
     const queue = view.queues[0] as (typeof view.queues)[number];
     expect(queue.running).toHaveLength(1);
-    expect(queue.running[0]).toMatchObject({ key: "k1", session: null, owner: null, state: "running", position: null });
+    expect(queue.running[0]).toMatchObject({
+      key: "k1",
+      session: null,
+      owner: null,
+      agent: "Tester",
+      state: "running",
+      position: null,
+    });
     expect(String(queue.running[0]?.command)).toContain("sh -c");
     expect(typeof queue.running[0]?.startedAt).toBe("number");
-    expect(queue.waiting).toMatchObject([{ command: "true", state: "waiting", position: 1, startedAt: null }]);
+    expect(queue.waiting).toMatchObject([
+      { command: "true", agent: null, state: "waiting", position: 1, startedAt: null },
+    ]);
     await Promise.all([first.exited, second.exited]);
   }, 20_000);
 

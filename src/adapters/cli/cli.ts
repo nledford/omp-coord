@@ -249,6 +249,8 @@ async function run(args: string[]): Promise<number> {
         id,
         queue,
         owner: values.owner || process.env.OMP_COORD_SESSION || null,
+        // set per command by the extension's bash hook
+        ...(process.env.OMP_COORD_AGENT ? { agent: process.env.OMP_COORD_AGENT } : {}),
         ...(values.lane === undefined ? {} : { lane: values.lane }),
         priority,
         ...(values.key === undefined ? {} : { key: values.key }),

@@ -109,6 +109,48 @@ describe("board store", () => {
     expect(b.events).toEqual([]);
   });
 
+  test("a job keeps the agent that queued it, and a board made before jobs recorded one gains the column", () => {
+    const db = freshDb();
+    new BoardStore(db).close();
+    // the board as omp-coord 0.2.x made it: no agent column, and a job saved without one
+    const old = new Database(db);
+    old.exec("ALTER TABLE jobs DROP COLUMN agent");
+    old.close();
+    const store = new BoardStore(db);
+    const job = (id: string, agent: string | undefined) => ({
+      id,
+      queue: "heavy",
+      owner: "a",
+      agent,
+      lane: "normal",
+      priority: 0,
+      key: `w ${id}`,
+      command: "cargo x",
+      socket: `/s/${id}`,
+      pid: 1,
+      state: "waiting" as const,
+      since: 1,
+      startedAt: undefined,
+    });
+    store.transact(b => {
+      join_("a")(b);
+      b.jobs.push(job("j1", "WaveImport"), job("j2", undefined));
+    });
+    expect(store.read().jobs.map(j => [j.id, j.agent])).toEqual([
+      ["j1", "WaveImport"],
+      ["j2", undefined],
+    ]);
+    // an older omp-coord still running saves the whole board without the column (DELETE, then INSERT by name): every
+    // recorded agent is dropped until no older session is left; the board stays readable
+    const older = new Database(db);
+    older.exec("DELETE FROM jobs");
+    older.exec(
+      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, socket, pid, state, since) VALUES ('j1', 'heavy', 'a', 'normal', 0, 'w j1', 'cargo x', '/s/j1', 1, 'waiting', 1)",
+    );
+    older.close();
+    expect(new BoardStore(db).read().jobs.map(j => [j.id, j.agent])).toEqual([["j1", undefined]]);
+  });
+
   test("pause, claims, ports, load and notes round-trip; notes are kept when no longer in the loaded window", () => {
     const store = new BoardStore(freshDb());
     store.transact(b => {

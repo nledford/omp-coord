@@ -5,7 +5,7 @@ import { capOf, used } from "../../domain/agents.ts";
 import { pauseReason } from "../../domain/control.ts";
 import type { DayStats, InterruptedSession } from "../../domain/history.ts";
 import { currentLoad } from "../../domain/limits.ts";
-import { type AgentPolicy, type Board, labelOf, type Note } from "../../domain/model.ts";
+import { type AgentPolicy, type Board, type Job, labelOf, type Note } from "../../domain/model.ts";
 import { agentList, LATEST_NOTES } from "../../domain/overview.ts";
 import { orderWaiting, type Queues, slotsOf } from "../../domain/queues.ts";
 
@@ -126,8 +126,13 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
 /** One block per queue: running jobs, then waiting jobs in the order they will start. */
 export function formatQueues(board: Board, queues: Queues, now: number): string[] {
   const lines: string[] = [];
-  const who = (owner: string | null) =>
-    owner === null ? "outside omp" : `session ${labelOf(board, owner) ?? "(ended)"}`;
+  // whose job: the session, and the agent when recorded ("session A/WaveImport")
+  const who = (j: Job) =>
+    (j.owner === null ? "outside omp" : `session ${labelOf(board, j.owner) ?? "(ended)"}`) +
+    (j.agent ? `/${j.agent}` : "");
+  // what it is: the job's key ("<checkout> <recipe> <args>") reads better than the command's full path; the command
+  // when there is no key
+  const what = (j: Job) => j.key || j.command;
   for (const [name, q] of Object.entries(queues)) {
     const running = board.jobs.filter(j => j.queue === name && j.state === "running");
     const waiting = orderWaiting(q, name, board, now);
@@ -135,14 +140,14 @@ export function formatQueues(board: Board, queues: Queues, now: number): string[
     const lowered = slots < q.slots && !board.pause ? ` (lowered from ${q.slots} under load)` : "";
     lines.push(`  ${name} (${q.order}): ${running.length}/${slots} running${lowered}, ${waiting.length} waiting`);
     for (const j of running)
-      lines.push(`    running  ${j.id}  ${who(j.owner)}  ${minutes(now - (j.startedAt ?? now))}  ${j.command}`);
+      lines.push(`    running  ${j.id}  ${who(j)}  ${minutes(now - (j.startedAt ?? now))}  ${what(j)}`);
     for (const [i, j] of waiting.entries()) {
       const extras = [
         j.lane === q.lanes.at(-1) ? "" : `lane ${j.lane}`,
         j.priority ? `priority ${j.priority}` : "",
       ].filter(Boolean);
       lines.push(
-        `    #${i + 1}       ${j.id}  ${who(j.owner)}  waited ${minutes(now - j.since)}${extras.length ? ` (${extras.join(", ")})` : ""}  ${j.command}`,
+        `    #${i + 1}       ${j.id}  ${who(j)}  waited ${minutes(now - j.since)}${extras.length ? ` (${extras.join(", ")})` : ""}  ${what(j)}`,
       );
     }
   }

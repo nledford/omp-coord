@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
-import { decideCommand } from "../../domain/commands.ts";
+import { decideCommand, withAgent } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
@@ -190,7 +190,12 @@ export default function ompCoord(pi: ExtensionAPI): void {
       config: rt.config.source,
     });
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
-    if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
+    const run = decision.kind === "queue" ? decision.command : command;
+    // Every agent of a session shares the omp process's environment, so the agent's id can reach `omp-coord run` (and
+    // the queue lines) only through the command itself; opt-in (`tagAgentCommands`), since the rewrite defeats omp's
+    // bash.patterns rules and other extensions' rewrites. Off, the hook changes only queued commands, as before.
+    if (rt.config.tagAgentCommands) return { input: { ...event.input, command: withAgent(ctx.agent.id, run) } };
+    if (decision.kind === "queue") return { input: { ...event.input, command: run } };
     return undefined;
   });
 

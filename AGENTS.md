@@ -47,7 +47,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/adapters/sqlite/store.ts` | `BoardRepository` on SQLite: state tables, the event log, the decision log, schema version, retention. |
 | `src/adapters/unix/beacon.ts` | `Listener` and `Liveness` on Unix sockets, one per live session or queued job. |
 | `src/adapters/os/load.ts`, `process-group.ts` | `LoadProbe` from the 1-minute load average; whether a timed-out job's process group still has a running member (zombies do not count). |
-| `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run. Keeps each subagent's binding to deliver messages to it. |
+| `src/adapters/omp/extension.ts`, `api.ts` | The omp adapter (hooks, tools, `/coord`, the 2 s tick) and the slice of omp's API it uses, declared locally (see below). Sets `OMP_COORD_SESSION`, `OMP_COORD_PORTS` and `OMP_COORD_SCRATCH` for commands the session's agents run, and with `tagAgentCommands` starts each agent command with `export OMP_COORD_AGENT=<agent id>;`. Keeps each subagent's binding to deliver messages to it. |
 | `src/adapters/cli/cli.ts` | `omp-coord` subcommands: argument parsing, signals, time limits and process spawning around the use cases; sets `OMP_COORD_JOB` and `OMP_COORD_QUEUE` for a queued command. |
 | `src/adapters/text/report.ts` | Text for `/coord`, the tools, the `omp-coord` subcommands and the footer. |
 
@@ -57,7 +57,7 @@ New behavior goes in the domain (rules) and the app (use cases), with tests ther
 
 - Every board change goes through `BoardRepository.transact`: load, pure transition, save state, append events, in one `BEGIN IMMEDIATE` transaction. Never write the tables any other way; several omp processes share them.
 - Domain rules are tested in the domain without SQL. The store only maps rows to and from `Board`.
-- The schema is still version 1 and may change freely: the plugin has no real-world users yet, so edit `SCHEMA` in `store.ts` in place and delete old scratch databases. Once it has users, a schema change bumps `SCHEMA_VERSION` and adds a migration step that keeps the `events` table (board state is short-lived and may be dropped).
+- The schema is version 1. The plugin is published (0.2.x), so `SCHEMA` is no longer edited in place. A nullable column may be added without a version bump through `#addColumns` in `store.ts` (an older omp-coord still running ignores it and its saves write null there); any other change bumps `SCHEMA_VERSION` and adds a migration step that keeps the `events` table (board state is short-lived and may be dropped).
 - The event log never stores message text.
 - No runtime dependencies: Bun built-ins only (`bun:sqlite`, `Bun.listen`). Dev dependencies are fine.
 - Background work uses `ctx.setInterval`/`ctx.setTimeout`. A raw timer that throws takes down the user's whole omp session.

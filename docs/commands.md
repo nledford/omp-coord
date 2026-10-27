@@ -61,7 +61,7 @@ Every time is milliseconds since the epoch (`Date.now()`); a session is its lett
 | `line[]` | Sessions waiting for a slot: `pool`, `session`, `position` (from 1), `since`, `heldUntil` (`null` unless a freed slot is held for it). |
 | `agents[]` | One per agent holding a slot, by session letter then `since`: `id` (`null` for a spawn with no key and no first run yet), `type`, `parent` (`Main` or an agent id), `session`, `pool` (`null`: outside the caps), `state` (`starting` or `running`), `since`. |
 | `claims[]` | `kind` (`branch`, `worktree`, `pr`), `target`, `session`, `agent`, `note`, `since`. |
-| `queues[]` | `name`, `order`, `slots` (now), `configuredSlots`, `running[]` and `waiting[]` (in the order they will start), each job: `id`, `session`, `owner` (the owning session's id, or `null` outside omp), `lane`, `priority`, `key` (or `null`), `command`, `state`, `queuedAt`, `startedAt` (`null` while waiting), `position` (from 1 while waiting, `null` while running). |
+| `queues[]` | `name`, `order`, `slots` (now), `configuredSlots`, `running[]` and `waiting[]` (in the order they will start), each job: `id`, `session`, `owner` (the owning session's id, or `null` outside omp), `lane`, `priority`, `key` (or `null`), `command`, `agent` (omp's id of the agent whose command queued it, `"Main"` for the main agent; `null` when `tagAgentCommands` is off, for a job started outside an agent's bash call, and while any session of the scope runs an omp-coord older than 0.2.3, whose saves drop it), `state`, `queuedAt`, `startedAt` (`null` while waiting), `position` (from 1 while waiting, `null` while running). |
 | `notes[]` | The latest three decisions, oldest first: `id`, `at`, `session` (the letter when it was written, kept after that session ends; `null` outside omp), `author`, `text`. |
 
 ```json
@@ -102,4 +102,5 @@ Exit codes: `0` success, the command's own for `run`, `75` a job not run, `124` 
 | `OMP_COORD_SESSION` | the extension | The session that owns jobs started from its agents' commands. |
 | `OMP_COORD_PORTS` | the extension | The session's port block, e.g. `18700-18799`, when `resources.ports` is set. |
 | `OMP_COORD_SCRATCH` | the extension | The session's scratch folder, when `resources.scratch` is set. |
+| `OMP_COORD_AGENT` | the extension, with `tagAgentCommands` | The agent whose command this is (`Main` for the main agent); `omp-coord run` records it on the job. |
 | `OMP_COORD_JOB`, `OMP_COORD_QUEUE` | `omp-coord run` | The running job's id and queue, for nested runs. |
