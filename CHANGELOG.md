@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- `omp-coord interrupted` and `/coord interrupted` no longer list an agent that was revived (`write agent://<id>`) since its session left, from a session in the same folder, nor its nested helpers, and leave out a session with none left; before, a session restarted after a crash kept being told to revive agents that had long finished. A new agent that only reuses the name doesn't count as a revival.
+
 ## [0.3.0] - 2026-10-27
 
 ### Changed

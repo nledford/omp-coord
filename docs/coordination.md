@@ -36,6 +36,6 @@ With `resources.ports`, each session gets its own block of ports, in `OMP_COORD_
 
 ## After a crash
 
-`/coord interrupted` (or `omp-coord interrupted`, which first drops sessions whose process is gone) lists, per session that left, the agents that were mid-run and the folder the session ran in. omp keeps their transcripts; revive each from a session in that folder with `write agent://<id>`.
+`/coord interrupted` (or `omp-coord interrupted`, which first drops sessions whose process is gone) lists, per session that left, the agents that were mid-run and the folder the session ran in. omp keeps their transcripts; revive each from a session in that folder with `write agent://<id>`. An agent revived since from a session in that folder, and its nested helpers, are left out; a new agent that only reuses the name is not a revival.
 
 `/coord agents` (or `omp-coord status --agents`) lists who runs: each agent's session, id, type, parent, pool and age, so a message to `B/<agent id>` goes to the agent you mean. `/coord stats` sums waits, refusals, peaks and job outcomes per day; `omp-coord doctor` checks the scope's health, and `doctor --fix` drops sessions and jobs whose process is gone.
