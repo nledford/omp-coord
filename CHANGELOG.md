@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-27
+
 ### Changed
 
 - **Breaking:** while a session is the only one in its scope, spawns past the cap now wait their turn instead of being refused (`agents.queueSpawns`, on by default): the extension keeps omp's per-session spawn queue (`task.maxConcurrency`) at what the caps allow the session, so you can start as many agents as you need and those past the cap start by themselves as slots free. With other sessions in the scope, or while paused, spawns over the cap are refused and the session joins the line, as before. A `task.maxConcurrency` you set stays the ceiling; the override is never saved and is cleared when the session ends. Set `agents.queueSpawns: false` to keep refusals always. See [agent slots](docs/agent-slots.md#spawns-wait-their-turn).
@@ -74,7 +76,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nledford/omp-coord/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/nledford/omp-coord/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/nledford/omp-coord/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/nledford/omp-coord/compare/v0.2.0...v0.2.1
