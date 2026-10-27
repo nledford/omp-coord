@@ -2,8 +2,8 @@
 # version files and changelog match it, run the checks, publish the npm package @nledford/omp-coord to npmjs.com
 # (trusted publishing: no stored token, provenance attached) and to GitHub Packages, then create the GitHub release
 # with the changelog entry as its notes. A GitHub release therefore always has both packages. Re-running is safe: a
-# version already in a registry is not published again (published versions cannot be replaced), and
-# `gh release create` fails rather than replace an existing release.
+# version already in a registry is not published again (published versions cannot be replaced), and a GitHub release
+# that exists already is left as it is.
 name: Release
 
 on:
@@ -12,6 +12,13 @@ on:
 
 permissions:
   contents: read
+
+# One release run per tag at a time. GitHub once delivered the v0.2.2 tag push twice in the same second: both runs got
+# past "unless this version is there already" before either published, and the second failed on npm's 409. Queued
+# (not canceled), the second run finds the version published and the release there, and skips both.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -58,11 +65,18 @@ jobs:
             echo "@nledford/omp-coord@$version is already on npmjs.com"
             exit 0
           fi
-          # A version npm already holds, even one still being processed, is refused as a conflict: that is a success.
+          # A version npm already holds, even one still being processed, is refused as a conflict. A conflict counts as
+          # success only once the registry shows this exact version (npm may take minutes to list it); otherwise fail.
           if ! npm publish --access public --registry "$registry" 2>&1 | tee "$RUNNER_TEMP/publish.log"; then
-            if grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions" "$RUNNER_TEMP/publish.log"; then
-              echo "npm already holds @nledford/omp-coord@$version"
-              exit 0
+            if grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|E409|already exists in live registry" "$RUNNER_TEMP/publish.log"; then
+              for _ in $(seq 40); do
+                if [ "$(npm view "@nledford/omp-coord@$version" version --registry "$registry" 2>/dev/null)" = "$version" ]; then
+                  echo "npm already holds @nledford/omp-coord@$version"
+                  exit 0
+                fi
+                sleep 15
+              done
+              echo "::error::npm refused the publish as a conflict, but @nledford/omp-coord@$version did not appear within 10 minutes"
             fi
             exit 1
           fi
@@ -116,5 +130,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists already"
+            exit 0
+          fi
           bun scripts/release.ts notes "${TAG#v}" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"

@@ -61,5 +61,20 @@ function quote(word: string): string {
  * compound line; each agent's next command sets it again.
  */
 export function withAgent(agentId: string, command: string): string {
-  return `export OMP_COORD_AGENT=${quote(agentId)}; ${command}`;
+  return `export OMP_COORD_AGENT=${quote(agentId)}; ${withoutAgentExports(command)}`;
 }
+
+/** The command without the `export OMP_COORD_AGENT=…;` prefixes it starts with, if any. */
+export function withoutAgentExports(command: string): string {
+  return command.replace(LEADING_AGENT_EXPORTS, "");
+}
+
+/**
+ * The `export OMP_COORD_AGENT=…;` prefixes already at the start of a command. The rewritten command is what the
+ * conversation shows, so an agent that copies its earlier calls sends them back; without stripping, each call would
+ * add one more. A value is single-quoted as `quote` writes it (`'\''` for a quote inside) or a bare word of
+ * shell-safe characters only, so a hand-typed value holding `\;`, `|`, `>` or a substitution is never mistaken for
+ * a prefix and nothing of the command itself is dropped. Only spaces and tabs may surround the assignment: in bash a
+ * newline ends a command, so an `export` alone on its line is a command of its own, not part of a prefix.
+ */
+const LEADING_AGENT_EXPORTS = /^(?:\s*export[ \t]+OMP_COORD_AGENT=(?:'(?:[^']|'\\'')*'|[\w.@%+,:/=-]+)[ \t]*;)+\s*/;
