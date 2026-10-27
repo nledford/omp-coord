@@ -45,7 +45,7 @@ just release-publish           # asks, then tags the release on main and pushes 
 
 `just release` refuses an empty Unreleased section in the changelog, then creates the `release-vX.Y.Z` branch, sets the version in `package.json` and the marketplace catalog, dates the changelog, runs the checks and commits `Release vX.Y.Z`, all locally. If anything fails, the files are put back and you stay on (or return to) `main` with no branch left. The version changes only in release commits, because omp upgrades marketplace installs only when the catalog's version goes up.
 
-`just release-publish` tags the commit on `main` where `package.json` took the new version (the merge, squash or rebased commit), even if other pull requests merged after it, and refuses if `origin` already has that tag. A push that failed can be run again.
+`just release-publish` tags the commit on `main` that added the dated changelog section of the new version (the merge, squash or rebased commit), even if other pull requests merged after it, and refuses if `origin` already has that tag. A push that failed can be run again.
 
 Once the release PR is merged, marketplace installs (which follow `main`) can see the new version before the tag and the GitHub release exist, so run `just release-publish` right after merging.
 

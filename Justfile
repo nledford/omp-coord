@@ -88,10 +88,11 @@ release-publish:
     version=$(bun -e 'console.log(require("{{ root }}/package.json").version)')
     tag="v$version"
     ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || { echo "$tag is published already (origin has the tag): run \`just release <change>\` for a new release" >&2; exit 1; }
-    # the version changes only in release commits: the main commit where package.json took it is the release, whether
-    # the PR was merged, squashed or rebased, and even if other PRs merged since
-    release=$(git log --first-parent -n 1 --format=%H -S"\"version\": \"$version\"" origin/main -- package.json)
-    [ -n "$release" ] || { echo "main never took version $version: merge the release PR first" >&2; exit 1; }
+    # only a release commit dates the changelog section of its version: the main commit that added that heading is the
+    # release, whether the PR was merged, squashed or rebased, even if other PRs merged since, and even when the
+    # version number itself didn't change (a first release)
+    release=$(git log --first-parent -n 1 --format=%H -S"## [$version] - " origin/main -- CHANGELOG.md)
+    [ -n "$release" ] || { echo "main has no release of $version yet: merge the release PR first" >&2; exit 1; }
     bun '{{ root }}/scripts/release.ts' verify "$tag"
     if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
       [ "$(git rev-parse "$tag^{commit}")" = "$release" ] || { echo "a local $tag points elsewhere: delete it (git tag -d $tag) and run this again" >&2; exit 1; }
