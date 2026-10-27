@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-27
+
 ### Fixed
 
 - `omp-coord interrupted` and `/coord interrupted` no longer list an agent that was revived (`write agent://<id>`) since its session left, from a session in the same folder, nor its nested helpers, and leave out a session with none left; before, a session restarted after a crash kept being told to revive agents that had long finished. A new agent that only reuses the name doesn't count as a revival.
@@ -80,7 +82,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/nledford/omp-coord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nledford/omp-coord/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/nledford/omp-coord/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/nledford/omp-coord/compare/v0.2.1...v0.2.2
