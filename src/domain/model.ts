@@ -97,10 +97,11 @@ export interface AgentSlot {
   state: "starting" | "running";
   since: number;
   /**
-   * Started without a spawn this extension approved (revived with `write agent://…`, or running when this session
-   * joined): it holds no place in omp's spawn queue, so `spawnAllowance` doesn't count it.
+   * Holds no place in omp's spawn queue, so `spawnAllowance` doesn't count it: started without a spawn this extension
+   * approved (revived with `write agent://…`, or running when this session joined), or a workpool worker (omp starts
+   * those outside the queue, as spawns of `invocationKind` "eval").
    */
-  revived?: true;
+  unqueued?: true;
 }
 
 /** A session's place in line for a pool, after a refused spawn. */

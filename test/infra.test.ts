@@ -151,11 +151,11 @@ describe("board store", () => {
     expect(new BoardStore(db).read().jobs.map(j => [j.id, j.agent])).toEqual([["j1", undefined]]);
   });
 
-  test("a revived agent's slot stays marked revived, and a board made before slots recorded it gains the column", () => {
+  test("a slot holding no place in omp's queue stays marked, and a board made before slots recorded it gains the column", () => {
     const db = freshDb();
     new BoardStore(db).close();
     const old = new Database(db);
-    old.exec("ALTER TABLE slots DROP COLUMN revived");
+    old.exec("ALTER TABLE slots DROP COLUMN unqueued");
     old.close();
     const store = new BoardStore(db);
     const slot = {
@@ -168,9 +168,9 @@ describe("board store", () => {
     };
     store.transact(b => {
       join_("a")(b);
-      b.slots.push({ ...slot, agentId: "Old", revived: true }, { ...slot, agentId: "New" });
+      b.slots.push({ ...slot, agentId: "Old", unqueued: true }, { ...slot, agentId: "New" });
     });
-    expect(store.read().slots.map(s => [s.agentId, s.revived])).toEqual([
+    expect(store.read().slots.map(s => [s.agentId, s.unqueued])).toEqual([
       ["Old", true],
       ["New", undefined],
     ]);

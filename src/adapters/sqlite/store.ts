@@ -48,7 +48,7 @@ CREATE TABLE slots (
   pool       TEXT,
   state      TEXT NOT NULL CHECK (state IN ('starting', 'running')),
   since      INTEGER NOT NULL,
-  revived    INTEGER
+  unqueued   INTEGER
 ) STRICT;
 CREATE TABLE tickets (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -256,7 +256,7 @@ export class BoardStore implements BoardRepository {
         .all()
         .some(c => c.name === column);
     if (!has("jobs", "agent")) this.#db.exec("ALTER TABLE jobs ADD COLUMN agent TEXT");
-    if (!has("slots", "revived")) this.#db.exec("ALTER TABLE slots ADD COLUMN revived INTEGER");
+    if (!has("slots", "unqueued")) this.#db.exec("ALTER TABLE slots ADD COLUMN unqueued INTEGER");
   }
 
   #maybePruneEvents(now: number): void {
@@ -306,7 +306,7 @@ export class BoardStore implements BoardRepository {
             pool: string | null;
             state: "starting" | "running";
             since: number;
-            revived: number | null;
+            unqueued: number | null;
           },
           []
         >("SELECT * FROM slots ORDER BY id")
@@ -319,7 +319,7 @@ export class BoardStore implements BoardRepository {
           pool: r.pool,
           state: r.state,
           since: r.since,
-          ...(r.revived ? { revived: true as const } : {}),
+          ...(r.unqueued ? { unqueued: true as const } : {}),
         })),
       waitlist: db
         .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>(
@@ -466,10 +466,19 @@ export class BoardStore implements BoardRepository {
         s.ports?.to ?? null,
       );
     const slot = db.query(
-      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, revived) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, unqueued) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const s of board.slots)
-      slot.run(s.sessionId, s.agentId ?? null, s.parentId, s.agentType, s.pool, s.state, s.since, s.revived ? 1 : null);
+      slot.run(
+        s.sessionId,
+        s.agentId ?? null,
+        s.parentId,
+        s.agentType,
+        s.pool,
+        s.state,
+        s.since,
+        s.unqueued ? 1 : null,
+      );
     const ticket = db.query(
       "INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)",
     );

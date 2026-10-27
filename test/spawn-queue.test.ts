@@ -57,6 +57,16 @@ describe("omp's spawn queue, driven by the caps", () => {
     expect(h.writes).toEqual([2, undefined]);
   });
 
+  test("an allowance of `undefined` (not driven) gives the queue back to the user's own value", () => {
+    const h = fakeHandle(4);
+    const q = spawnQueue(h.handle, {});
+    q?.apply(2);
+    q?.apply(undefined);
+    expect(h.value()).toBe(4);
+    q?.apply(3);
+    expect(h.value()).toBe(3);
+  });
+
   test("without omp's setting handle or a settings scope nothing is driven", async () => {
     expect(spawnQueue(undefined, {})).toBeUndefined();
     expect(spawnQueue(fakeHandle().handle, undefined)).toBeUndefined();

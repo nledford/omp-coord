@@ -3,9 +3,9 @@
  * the caps let run now (`spawnAllowance`), so spawns past it wait in omp's queue and start as places free, instead of
  * reaching the spawn check and being refused.
  *
- * omp re-reads the setting at each acquire and release of a place in its queue, so a raised value admits waiting
- * spawns at the next start or end of one of this session's agents. A slot another session frees is therefore taken up
- * then, or by the held-slot notice; see docs/agent-slots.md.
+ * Driven only while the session is alone in its scope and not paused (see `spawnAllowance`); otherwise the override is
+ * cleared and spawns over the cap are refused at the spawn check. omp re-reads the setting only when the session asks
+ * for a spawn or one of its runs ends, so a changed value takes effect then.
  *
  * The setting is changed by a runtime override (never persisted) and cleared when the session stops. A value the user
  * set is a ceiling the override never exceeds; it is read when the session starts, so a change to it takes effect in

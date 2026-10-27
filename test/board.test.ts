@@ -481,7 +481,22 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
       now: 0,
     });
     run(board, "a", "A1");
-    // A1 holds a place; Old holds a slot only: one more spawn fits (2 = A1 + nothing free), not 3
+    // A1 holds a place in omp's queue, Old only a slot: the allowance is A1's place and nothing free (1), not 2
+    expect(allowance(board, "a")).toBe(1);
+  });
+
+  test("a workpool worker (an eval spawn) takes a slot but no place in omp's queue, so it isn't counted", () => {
+    const board = boardWith("a");
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "W1",
+      invocationKind: "eval",
+      now: 0,
+    });
+    run(board, "a", "A1");
     expect(allowance(board, "a")).toBe(1);
   });
 
@@ -509,6 +524,15 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
     removeSession(board, policy, "b", MIN); // B leaves; A is alone again
     // A: the scout (starting) + the held work slot + work's free slot (B2's, now gone with B)
     expect(allowance(board, "a", MIN)).toBe(3);
+  });
+
+  test("a slot held for this session in another pool adds nothing to the default pool's queue", () => {
+    const board = boardWith("a", "b");
+    run(board, "b", "S1", "scout"); // B fills short
+    expect(spawn(board, "a", "scout").allowed).toBe(false);
+    agentEnded(board, policy, { sessionId: "b", agentId: "S1", now: MIN }); // a short slot is held for A
+    removeSession(board, policy, "b", MIN);
+    expect(allowance(board, "a", MIN)).toBe(2);
   });
 
   test("top-level reviewers hold a place too; subagents' reviewers don't", () => {
