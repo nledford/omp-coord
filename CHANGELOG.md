@@ -12,7 +12,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ### Changed
 
-- While any `refuse` rule is configured, a bash command longer than 32,768 characters is refused with a message, instead of being judged by the patterns: a pattern that stalls on a very long line froze the session's `tool_call` check (omp gives it 30 s and fails closed), and one that runs out of backtracking budget answered "no match" and let the command through. Configs without a `refuse` rule are not affected. See [queues](docs/queues.md#agents-commands).
+- **Breaking:** while any `refuse` rule is configured, a bash command longer than 32,768 characters is refused with a message, instead of being judged by the patterns: a pattern that stalls on a very long line froze the session's `tool_call` check (omp gives it 30 s and fails closed), and one that runs out of backtracking budget answered "no match" and let the command through. A command that used to run and is now refused: write the long script to a file with the write tool and run it from a short command. Configs without a `refuse` rule (queue rules only) are not affected. See [queues](docs/queues.md#agents-commands).
 
 ## [0.3.2] - 2026-10-28
 
