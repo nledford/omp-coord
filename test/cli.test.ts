@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BoardStore } from "../src/adapters/sqlite/store.ts";
+import { bindOmpSession, registerSession } from "../src/domain/sessions.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "adapters", "cli", "cli.ts");
 
@@ -10,7 +12,13 @@ function scope(queues: Record<string, unknown>) {
   mkdirSync(join(root, "state"));
   writeFileSync(join(root, ".omp-coord.json"), JSON.stringify({ scope: "cli", queues }));
   // no session or agent of the omp running these tests leaks into the jobs
-  const env = { ...process.env, OMP_COORD_STATE_DIR: join(root, "state"), OMP_COORD_SESSION: "", OMP_COORD_AGENT: "" };
+  const env = {
+    ...process.env,
+    OMP_COORD_STATE_DIR: join(root, "state"),
+    OMP_COORD_SESSION: "",
+    OMP_COORD_AGENT: "",
+    PI_SESSION_ID: "",
+  };
   const runAs = (agent: string, ...args: string[]) =>
     Bun.spawn(["bun", CLI, ...args], {
       cwd: root,
@@ -18,8 +26,15 @@ function scope(queues: Record<string, unknown>) {
       stdout: "pipe",
       stderr: "pipe",
     });
+  const runIn = (ompSession: string, ...args: string[]) =>
+    Bun.spawn(["bun", CLI, ...args], {
+      cwd: root,
+      env: { ...env, PI_SESSION_ID: ompSession, OMP_COORD_AGENT: "Stale" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
   const run = (...args: string[]) => runAs("", ...args);
-  return { root, run, runAs };
+  return { root, run, runAs, runIn };
 }
 
 /** Resolves once `file` exists, i.e. the command that writes it has started. */
@@ -221,6 +236,40 @@ describe("omp-coord status --json and --agents", () => {
       { command: "true", agent: null, state: "waiting", position: 1, startedAt: null },
     ]);
     await Promise.all([first.exited, second.exited]);
+  }, 20_000);
+
+  test("a job records the agent its omp session id belongs to, ahead of OMP_COORD_AGENT, which only an unknown id falls back to", async () => {
+    const { root, run, runIn } = scope({ heavy: { slots: 3 } });
+    const store = new BoardStore(join(root, "state", "cli.db"));
+    store.transact(b => {
+      registerSession(b, { id: "s1", pid: 1, cwd: root, socket: `${root}/s1.sock`, configHash: "h", now: 0 });
+      bindOmpSession(b, "s1", "omp-main");
+      b.slots.push({
+        sessionId: "s1",
+        agentId: "Kid",
+        parentId: "Main",
+        agentType: "task",
+        pool: "work",
+        state: "running",
+        since: 0,
+        ompSessionId: "omp-kid",
+      });
+    });
+    store.close();
+    const hold = (name: string) => `touch ${root}/${name}; while [ ! -e ${root}/go ]; do sleep 0.1; done`;
+    const jobs = [
+      runIn("omp-main", "run", "heavy", "--", "sh", "-c", hold("main")),
+      runIn("omp-kid", "run", "heavy", "--", "sh", "-c", hold("kid")),
+      runIn("omp-unknown", "run", "heavy", "--", "sh", "-c", hold("nobody")),
+    ];
+    for (const name of ["main", "kid", "nobody"]) await started(join(root, name));
+    const view = JSON.parse(await new Response(run("status", "--json").stdout).text()) as {
+      queues: { running: { command: string; agent: string | null }[] }[];
+    };
+    writeFileSync(join(root, "go"), "");
+    const agentOf = (name: string) => view.queues[0]?.running.find(j => j.command.includes(`/${name}`))?.agent;
+    expect([agentOf("main"), agentOf("kid"), agentOf("nobody")]).toEqual(["Main", "Kid", "Stale"]);
+    await Promise.all(jobs.map(j => j.exited));
   }, 20_000);
 
   test("--json with a board that cannot be read exits non-zero, writes the error to stderr and nothing to stdout", async () => {

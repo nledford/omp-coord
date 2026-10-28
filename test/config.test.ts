@@ -34,12 +34,9 @@ describe("config", () => {
     expect(() => parseConfig({ scope: "p", history: { retentionDays: 0 } }, "f")).toThrow(/history\.retentionDays/);
   });
 
-  test("tagging agent commands is off unless the file turns it on, and must be true or false", () => {
-    expect(parseConfig({ scope: "p" }, "f").tagAgentCommands).toBe(false);
-    expect(parseConfig({ scope: "p", tagAgentCommands: true }, "f").tagAgentCommands).toBe(true);
-    expect(() => parseConfig({ scope: "p", tagAgentCommands: "yes" }, "f")).toThrow(
-      new ConfigError("f: tagAgentCommands must be true or false"),
-    );
+  test("tagAgentCommands, which no longer does anything, is still accepted whatever it holds", () => {
+    for (const value of [true, false, "yes"])
+      expect(parseConfig({ scope: "p", tagAgentCommands: value }, "f")).not.toHaveProperty("tagAgentCommands");
   });
 
   test("spawns wait in omp's queue unless the file turns it off; the switch must be true or false", () => {

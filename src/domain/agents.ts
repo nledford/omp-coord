@@ -154,6 +154,8 @@ export function agentStarted(
      * spawn queue, so its new slot is marked "eval", not "revived".
      */
     evalWorker?: boolean;
+    /** omp's id for the agent's own session, so its bash calls can be traced to it. */
+    ompSessionId?: string;
     now: number;
   },
 ): { pool: string; used: number; cap: number } | null {
@@ -184,6 +186,7 @@ export function agentStarted(
   if (slot) {
     slot.agentId = a.agentId;
     slot.state = "running";
+    if (a.ompSessionId !== undefined) slot.ompSessionId = a.ompSessionId;
   } else {
     slot = {
       sessionId: a.sessionId,
@@ -194,6 +197,7 @@ export function agentStarted(
       state: "running",
       since: a.now,
       unqueued: a.evalWorker ? "eval" : "revived",
+      ...(a.ompSessionId === undefined ? {} : { ompSessionId: a.ompSessionId }),
     };
     board.slots.push(slot);
   }

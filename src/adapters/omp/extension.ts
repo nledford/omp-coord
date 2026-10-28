@@ -17,7 +17,7 @@ import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { spawnAllowance } from "../../domain/agents.ts";
-import { decideCommand, withAgent, withoutAgentExports } from "../../domain/commands.ts";
+import { decideCommand } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
@@ -55,6 +55,8 @@ interface Runtime {
   listener: Listener;
   sessionId: string;
   label: string;
+  /** omp's id for the main conversation, as agents' bash calls carry it (`PI_SESSION_ID`). */
+  ompSessionId: string | undefined;
   /** The main session's binding and context: messages for the session go through them. */
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -98,13 +100,23 @@ export default function ompCoord(pi: ExtensionAPI): void {
       shared.bindings.set(ctx.agent.id, pi);
       return;
     }
-    if (shared.runtime) {
-      shared.runtime.pi = pi;
-      shared.runtime.ctx = ctx;
+    const rt = shared.runtime;
+    if (rt) {
+      rt.pi = pi;
+      rt.ctx = ctx;
+      syncMainSession(rt, ctx);
       return;
     }
     await start(pi, ctx);
   });
+
+  // omp keeps one process across /new, /resume and /fork, giving the main conversation a new id without a new
+  // `session_start`: its bash calls carry that id from now on.
+  for (const event of ["session_switch", "session_branch"] as const)
+    pi.on(event, (_event, ctx) => {
+      const rt = shared.runtime;
+      if (rt && ctx.agent.kind === "main") syncMainSession(rt, ctx);
+    });
 
   pi.on("session_shutdown", (_event, ctx) => {
     if (ctx.agent.kind !== "main") {
@@ -149,6 +161,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
     const rt = shared.runtime;
     if (!rt || !isTrackedSubagent(ctx)) return;
     guarded(rt, "record an agent run", () => {
+      const ompSessionId = ompSessionIdOf(ctx);
       const parentId = ctx.agent.parentId ?? "Main";
       const count = rt.coordinator.agentStarted({
         sessionId: rt.sessionId,
@@ -157,6 +170,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
         parentIsSubagent: parentId !== "Main",
         agentType: ctx.agent.name.toLowerCase(),
         evalWorker: rt.evalAgents.has(ctx.agent.id),
+        ...(ompSessionId === undefined ? {} : { ompSessionId }),
       });
       refreshQueue(rt);
       if (count && count.used > count.cap) {
@@ -183,6 +197,8 @@ export default function ompCoord(pi: ExtensionAPI): void {
     if (!rt || event.toolName !== "bash") return undefined;
     const command = event.input.command;
     if (typeof command !== "string") return undefined;
+    // the id must be on the board before the command can reach `omp-coord run`, whatever event announced a switch
+    if (ctx.agent.kind === "main") syncMainSession(rt, ctx);
 
     try {
       const cwd = typeof event.input.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
@@ -205,20 +221,15 @@ export default function ompCoord(pi: ExtensionAPI): void {
       notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
     }
 
-    // a copied `export OMP_COORD_AGENT=…;` would otherwise end up inside a queued job's own command
-    const own = rt.config.tagAgentCommands ? withoutAgentExports(command) : command;
-    const decision = decideCommand(rt.config.commands, own, {
+    const decision = decideCommand(rt.config.commands, command, {
       ...RUNNER,
       owner: rt.sessionId,
       config: rt.config.source,
     });
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
-    const run = decision.kind === "queue" ? decision.command : own;
-    // Every agent of a session shares the omp process's environment, so the agent's id can reach `omp-coord run` (and
-    // the queue lines) only through the command itself; opt-in (`tagAgentCommands`), since the rewrite defeats omp's
-    // bash.patterns rules and other extensions' rewrites. Off, the hook changes only queued commands, as before.
-    if (rt.config.tagAgentCommands) return { input: { ...event.input, command: withAgent(ctx.agent.id, run) } };
-    if (decision.kind === "queue") return { input: { ...event.input, command: run } };
+    // Only a queued command is rewritten. Which agent runs it needs no rewrite: omp gives every bash call its agent's
+    // session id (`PI_SESSION_ID`), and the board maps that id to the agent (`session_start`, `agent_start`).
+    if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
     return undefined;
   });
 
@@ -476,9 +487,10 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
       ? "While this is the only session, spawns past the cap wait in omp's queue and start as slots free; with others, they are refused and this session holds a place in line."
       : `Spawns past the cap are refused: ${typeof handle === "string" ? handle : "omp gave the extension no settings scope"}.`;
   }
+  const ompSessionId = ompSessionIdOf(ctx);
   let joined: Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label">;
   try {
-    joined = openSession(config, ctx.cwd);
+    joined = openSession(config, ctx.cwd, ompSessionId);
   } catch (error) {
     shared.inactive = `omp-coord is off: ${describe(error)}`;
     ctx.ui.notify(shared.inactive, "error");
@@ -488,6 +500,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const rt: Runtime = {
     config,
     ...joined,
+    ompSessionId,
     pi,
     ctx,
     timer: undefined,
@@ -543,6 +556,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 function openSession(
   config: Config,
   cwd: string,
+  ompSessionId: string | undefined,
 ): Pick<Runtime, "store" | "coordinator" | "listener" | "sessionId" | "label"> {
   const dir = stateDir();
   mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
@@ -552,7 +566,7 @@ function openSession(
     const coordinator = new Coordinator(config, store, unixLiveness, Date, osLoad);
     const sessionId = randomBytes(6).toString("hex");
     listener = startBeacon(join(dir, "s", `${sessionId}.sock`));
-    const label = coordinator.join(identity(sessionId, cwd, listener));
+    const label = coordinator.join(identity(sessionId, cwd, listener, ompSessionId));
     return { store, coordinator, listener, sessionId, label };
   } catch (error) {
     listener?.stop();
@@ -561,8 +575,29 @@ function openSession(
   }
 }
 
-function identity(sessionId: string, cwd: string, listener: Listener) {
-  return { id: sessionId, pid: process.pid, cwd, address: listener.address };
+function identity(sessionId: string, cwd: string, listener: Listener, ompSessionId: string | undefined) {
+  return {
+    id: sessionId,
+    pid: process.pid,
+    cwd,
+    address: listener.address,
+    ...(ompSessionId === undefined ? {} : { ompSessionId }),
+  };
+}
+
+/** Records the main conversation's omp session id on the board when it is not the one already there. */
+function syncMainSession(rt: Runtime, ctx: ExtensionContext): void {
+  const id = ompSessionIdOf(ctx);
+  if (id === undefined || id === rt.ompSessionId) return;
+  guarded(rt, "record the session id", () => {
+    rt.coordinator.bindOmpSession(rt.sessionId, id);
+    rt.ompSessionId = id;
+  });
+}
+
+/** omp's id for the conversation this context belongs to: what its bash calls carry as `PI_SESSION_ID`. */
+function ompSessionIdOf(ctx: ExtensionContext): string | undefined {
+  return ctx.sessionManager?.getSessionId?.() || undefined;
 }
 
 /** `<scratch>/<session letter>[/<agent id>]`, created on first use; undefined when the scope has no scratch root. */
@@ -600,7 +635,9 @@ async function tick(rt: Runtime): Promise<void> {
   if (shared.runtime !== rt) return;
   rt.ticks++;
   const now = Date.now();
-  const { label, inbox, holds, board } = rt.coordinator.tick(identity(rt.sessionId, rt.ctx.cwd, rt.listener));
+  const { label, inbox, holds, board } = rt.coordinator.tick(
+    identity(rt.sessionId, rt.ctx.cwd, rt.listener, rt.ompSessionId),
+  );
   rt.label = label;
   rt.queue?.apply(spawnAllowance(board, rt.config.agents, rt.sessionId, now));
 

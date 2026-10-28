@@ -19,6 +19,8 @@ export interface ExtensionContext {
   mode: "tui" | "rpc" | "json" | "print";
   hasUI: boolean;
   agent: AgentIdentity;
+  /** omp's id for this agent's own conversation: the `PI_SESSION_ID` its bash calls carry (read-only). */
+  sessionManager?: { getSessionId?(): string };
   ui: {
     notify(message: string, type?: "info" | "warning" | "error"): void;
     setStatus(key: string, text: string | undefined): void;
@@ -52,6 +54,8 @@ export type ToolCallResult = Block | { input: Record<string, unknown> };
 export interface Events {
   session_start: (event: unknown, ctx: ExtensionContext) => unknown;
   session_shutdown: (event: unknown, ctx: ExtensionContext) => unknown;
+  session_switch: (event: unknown, ctx: ExtensionContext) => unknown;
+  session_branch: (event: unknown, ctx: ExtensionContext) => unknown;
   agent_start: (event: unknown, ctx: ExtensionContext) => unknown;
   agent_end: (event: unknown, ctx: ExtensionContext) => unknown;
   before_subagent_spawn: (event: SpawnEvent, ctx: ExtensionContext) => Block | Promise<Block>;

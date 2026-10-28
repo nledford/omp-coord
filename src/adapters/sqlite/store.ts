@@ -37,7 +37,8 @@ CREATE TABLE sessions (
   started_at  INTEGER NOT NULL,
   config_hash TEXT NOT NULL,
   ports_from  INTEGER,
-  ports_to    INTEGER
+  ports_to    INTEGER,
+  omp_session TEXT
 ) STRICT;
 CREATE TABLE slots (
   id         INTEGER PRIMARY KEY,
@@ -48,7 +49,8 @@ CREATE TABLE slots (
   pool       TEXT,
   state      TEXT NOT NULL CHECK (state IN ('starting', 'running')),
   since      INTEGER NOT NULL,
-  unqueued   TEXT CHECK (unqueued IN ('revived', 'eval'))
+  unqueued   TEXT CHECK (unqueued IN ('revived', 'eval')),
+  omp_session TEXT
 ) STRICT;
 CREATE TABLE tickets (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -258,6 +260,8 @@ export class BoardStore implements BoardRepository {
     if (!has("jobs", "agent")) this.#db.exec("ALTER TABLE jobs ADD COLUMN agent TEXT");
     if (!has("slots", "unqueued"))
       this.#db.exec("ALTER TABLE slots ADD COLUMN unqueued TEXT CHECK (unqueued IN ('revived', 'eval'))");
+    if (!has("sessions", "omp_session")) this.#db.exec("ALTER TABLE sessions ADD COLUMN omp_session TEXT");
+    if (!has("slots", "omp_session")) this.#db.exec("ALTER TABLE slots ADD COLUMN omp_session TEXT");
   }
 
   #maybePruneEvents(now: number): void {
@@ -283,6 +287,7 @@ export class BoardStore implements BoardRepository {
             config_hash: string;
             ports_from: number | null;
             ports_to: number | null;
+            omp_session: string | null;
           },
           []
         >("SELECT * FROM sessions")
@@ -296,6 +301,7 @@ export class BoardStore implements BoardRepository {
           startedAt: r.started_at,
           configHash: r.config_hash,
           ports: r.ports_from === null || r.ports_to === null ? undefined : { from: r.ports_from, to: r.ports_to },
+          ...(r.omp_session ? { ompSessionId: r.omp_session } : {}),
         })),
       slots: db
         .query<
@@ -308,6 +314,7 @@ export class BoardStore implements BoardRepository {
             state: "starting" | "running";
             since: number;
             unqueued: "revived" | "eval" | null;
+            omp_session: string | null;
           },
           []
         >("SELECT * FROM slots ORDER BY id")
@@ -321,6 +328,7 @@ export class BoardStore implements BoardRepository {
           state: r.state,
           since: r.since,
           ...(r.unqueued ? { unqueued: r.unqueued } : {}),
+          ...(r.omp_session ? { ompSessionId: r.omp_session } : {}),
         })),
       waitlist: db
         .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>(
@@ -452,7 +460,7 @@ export class BoardStore implements BoardRepository {
     }
 
     const session = db.query(
-      "INSERT INTO sessions (id, label, pid, cwd, socket, started_at, config_hash, ports_from, ports_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, label, pid, cwd, socket, started_at, config_hash, ports_from, ports_to, omp_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const s of board.sessions)
       session.run(
@@ -465,12 +473,23 @@ export class BoardStore implements BoardRepository {
         s.configHash,
         s.ports?.from ?? null,
         s.ports?.to ?? null,
+        s.ompSessionId ?? null,
       );
     const slot = db.query(
-      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, unqueued) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, unqueued, omp_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const s of board.slots)
-      slot.run(s.sessionId, s.agentId ?? null, s.parentId, s.agentType, s.pool, s.state, s.since, s.unqueued ?? null);
+      slot.run(
+        s.sessionId,
+        s.agentId ?? null,
+        s.parentId,
+        s.agentType,
+        s.pool,
+        s.state,
+        s.since,
+        s.unqueued ?? null,
+        s.ompSessionId ?? null,
+      );
     const ticket = db.query(
       "INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)",
     );

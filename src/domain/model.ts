@@ -41,6 +41,11 @@ export interface SessionRecord {
   configHash: string;
   /** Port range handed to this session, when the scope hands out ports. */
   ports: PortRange | undefined;
+  /**
+   * omp's id for the main session's conversation (`PI_SESSION_ID` in its agents' bash calls). omp can change it
+   * within one process (`/new`, `/resume`, `/fork`), so the extension binds it again whenever it sees another.
+   */
+  ompSessionId?: string;
 }
 
 export interface PortRange {
@@ -102,6 +107,8 @@ export interface AgentSlot {
    * those outside the queue, as spawns of `invocationKind` "eval").
    */
   unqueued?: "revived" | "eval";
+  /** omp's id for the agent's own session (`PI_SESSION_ID` in its bash calls), once its run started. */
+  ompSessionId?: string;
 }
 
 /** A session's place in line for a pool, after a refused spawn. */

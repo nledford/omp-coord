@@ -73,6 +73,25 @@ describe("a session pruning the board", () => {
   });
 });
 
+describe("a session's omp session id", () => {
+  test("binding it records it on the board; the tick keeps it, and writes it back when it was dropped", () => {
+    const { repo, coordinator } = setup();
+    const onBoard = () => repo.board.sessions.map(s => s.ompSessionId);
+    coordinator.join({ ...me, ompSessionId: "omp-1" });
+    expect(onBoard()).toEqual(["omp-1"]);
+    coordinator.bindOmpSession("me", "omp-2");
+    expect(onBoard()).toEqual(["omp-2"]);
+    // another session dropped it: the tick re-registers it under its id
+    repo.board.sessions = [];
+    coordinator.tick({ ...me, ompSessionId: "omp-2" });
+    expect(onBoard()).toEqual(["omp-2"]);
+    // an older omp-coord's save wrote the session back without the id
+    for (const s of repo.board.sessions) delete s.ompSessionId;
+    coordinator.tick({ ...me, ompSessionId: "omp-2" });
+    expect(onBoard()).toEqual(["omp-2"]);
+  });
+});
+
 describe("running a job through a queue", () => {
   function runner(repo: MemoryRepository, liveness: FakeLiveness, clock: FakeClock, over: Partial<RunnerPorts> = {}) {
     const log: string[] = [];

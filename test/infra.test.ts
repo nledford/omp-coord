@@ -181,6 +181,33 @@ describe("board store", () => {
     ]);
   });
 
+  test("the omp session ids of the main session and a subagent round-trip, and a board made before they were recorded gains the columns", () => {
+    const db = freshDb();
+    new BoardStore(db).close();
+    const old = new Database(db);
+    old.exec("ALTER TABLE sessions DROP COLUMN omp_session");
+    old.exec("ALTER TABLE slots DROP COLUMN omp_session");
+    old.close();
+    const store = new BoardStore(db);
+    store.transact(b => {
+      join_("a")(b);
+      for (const s of b.sessions) s.ompSessionId = "omp-main";
+      b.slots.push({
+        sessionId: "a",
+        agentId: "Kid",
+        parentId: "Main",
+        agentType: "task",
+        pool: "work",
+        state: "running",
+        since: 1,
+        ompSessionId: "omp-kid",
+      });
+    });
+    const b = store.read();
+    expect(b.sessions.map(s => s.ompSessionId)).toEqual(["omp-main"]);
+    expect(b.slots.map(s => s.ompSessionId)).toEqual(["omp-kid"]);
+  });
+
   test("pause, claims, ports, load and notes round-trip; notes are kept when no longer in the loaded window", () => {
     const store = new BoardStore(freshDb());
     store.transact(b => {

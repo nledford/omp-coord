@@ -26,12 +26,6 @@ export interface Config {
   commands: CommandRule[];
   /** Build and test queues, machine-wide within the scope. */
   queues: Queues;
-  /**
-   * Start each agent bash command with `export OMP_COORD_AGENT=<agent id>;` so queued jobs record whose they are.
-   * Off by default: the rewritten command no longer matches omp's `bash.patterns` rules and replaces other
-   * extensions' rewrites of the same call.
-   */
-  tagAgentCommands: boolean;
   /** Port ranges and scratch folders handed to sessions and their agents. */
   resources: { ports: PortPolicy | undefined; scratch: string | undefined };
   /** Retention of the event log and the decision log. */
@@ -192,7 +186,6 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
     },
     commands,
     queues,
-    tagAgentCommands: flag(root.tagAgentCommands ?? false, "tagAgentCommands", fail),
     resources: { ports, scratch },
     history: {
       maxAgeMs: count(history.retentionDays ?? 30, "history.retentionDays", fail) * 24 * 3_600_000,
