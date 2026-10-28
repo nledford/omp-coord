@@ -24,14 +24,16 @@ describe("agents' bash commands", () => {
     // A pattern that would stall forever is never run on it.
     const trap: CommandRule[] = [{ pattern: /^(a+)+$/, action: "refuse", reason: "r" }];
     const started = performance.now();
-    expect(decideCommand(trap, "a".repeat(MAX_CHECKED_COMMAND + 1), runner).kind).toBe("refuse");
+    const stalled = decideCommand(trap, `${"a".repeat(MAX_CHECKED_COMMAND)}!`, runner);
+    expect(stalled.kind === "refuse" && stalled.reason.includes(String(MAX_CHECKED_COMMAND))).toBe(true);
     expect(performance.now() - started).toBeLessThan(50);
   });
 
   test("the cap applies only where a refuse rule could be dodged by a long line", () => {
     const queueOnly: CommandRule[] = [{ pattern: /cargo test/, action: "queue", queue: "test", lane: undefined }];
     expect(decideCommand(queueOnly, `echo ${"a".repeat(MAX_CHECKED_COMMAND)}`, runner)).toEqual({ kind: "allow" });
-    expect(decideCommand(rules, `echo ${"a".repeat(MAX_CHECKED_COMMAND - 10)}`, runner)).toEqual({ kind: "allow" });
+    expect(decideCommand(rules, "a".repeat(MAX_CHECKED_COMMAND), runner)).toEqual({ kind: "allow" });
+    expect(decideCommand(rules, "a".repeat(MAX_CHECKED_COMMAND + 1), runner).kind).toBe("refuse");
   });
 
   test("a queued command runs through the queue as the same shell command, owned by the session", () => {
