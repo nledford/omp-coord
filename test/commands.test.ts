@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type CommandRule, decideCommand } from "../src/domain/commands.ts";
+import { type CommandRule, decideCommand, MAX_CHECKED_COMMAND } from "../src/domain/commands.ts";
 
 const rules: CommandRule[] = [
   { pattern: /(^|[;&|(\s])pkill\b/, action: "refuse", reason: "stop only your own process" },
@@ -14,6 +14,26 @@ describe("agents' bash commands", () => {
       kind: "refuse",
       reason: "stop only your own process",
     });
+  });
+
+  test("a command over the length cap is refused when any refuse rule exists, without running a pattern on it", () => {
+    const long = `echo ${"a".repeat(MAX_CHECKED_COMMAND)}`;
+    const decision = decideCommand(rules, long, runner);
+    expect(decision.kind).toBe("refuse");
+    if (decision.kind === "refuse") expect(decision.reason).toContain(String(MAX_CHECKED_COMMAND));
+    // A pattern that would stall forever is never run on it.
+    const trap: CommandRule[] = [{ pattern: /^(a+)+$/, action: "refuse", reason: "r" }];
+    const started = performance.now();
+    const stalled = decideCommand(trap, `${"a".repeat(MAX_CHECKED_COMMAND)}!`, runner);
+    expect(stalled.kind === "refuse" && stalled.reason.includes(String(MAX_CHECKED_COMMAND))).toBe(true);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  test("the cap applies only where a refuse rule could be dodged by a long line", () => {
+    const queueOnly: CommandRule[] = [{ pattern: /cargo test/, action: "queue", queue: "test", lane: undefined }];
+    expect(decideCommand(queueOnly, `echo ${"a".repeat(MAX_CHECKED_COMMAND)}`, runner)).toEqual({ kind: "allow" });
+    expect(decideCommand(rules, "a".repeat(MAX_CHECKED_COMMAND), runner)).toEqual({ kind: "allow" });
+    expect(decideCommand(rules, "a".repeat(MAX_CHECKED_COMMAND + 1), runner).kind).toBe("refuse");
   });
 
   test("a queued command runs through the queue as the same shell command, owned by the session", () => {

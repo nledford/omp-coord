@@ -26,10 +26,22 @@ export interface Runner {
   config: string;
 }
 
+/**
+ * Longest command a `refuse` rule is judged on. omp's `tool_call` check is synchronous here and fails closed after 30 s,
+ * and a regex that spends its whole backtracking budget answers "no match", which would let the command through. A
+ * longer command is refused instead, so the cost of every pattern is bounded by this length.
+ */
+export const MAX_CHECKED_COMMAND = 32_768;
+
 export function decideCommand(rules: CommandRule[], command: string, runner: Runner): CommandDecision {
   // Already queued: a command that runs `omp-coord run`, or one this extension rewrote.
   if (/(^|[;&|(\s'"/])omp-coord'?\s+'?run\b/.test(command) || runner.argv.every(a => command.includes(a)))
     return { kind: "allow" };
+  if (command.length > MAX_CHECKED_COMMAND && rules.some(r => r.action === "refuse"))
+    return {
+      kind: "refuse",
+      reason: `the command is ${command.length} characters, over the ${MAX_CHECKED_COMMAND} that omp-coord's refuse rules can check: create the file with the write tool and run it from a short command`,
+    };
   const rule = rules.find(r => r.pattern.test(command));
   if (!rule) return { kind: "allow" };
   if (rule.action === "refuse") return { kind: "refuse", reason: rule.reason };
