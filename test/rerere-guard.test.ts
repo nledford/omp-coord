@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
-import { decideCommand } from "../src/domain/commands.ts";
+import { decideCommand, MAX_CHECKED_COMMAND } from "../src/domain/commands.ts";
 
 // The rerere rules shipped in examples/omp-coord.json, loaded the way a project's own file is.
 const config = loadConfig(new URL("../examples/omp-coord.json", import.meta.url).pathname);
@@ -168,7 +168,7 @@ describe("rerere cache rules in the example config", () => {
     test(`refuses: ${command}`, () => {
       const decision = decide(command);
       expect(decision.kind).toBe("refuse");
-      if (decision.kind === "refuse") {
+      if (decision.kind === "refuse" && command.length <= MAX_CHECKED_COMMAND) {
         expect(decision.reason).toContain("rerere.enabled=false");
         expect(decision.reason).toContain("every worktree");
       }

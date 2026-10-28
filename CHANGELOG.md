@@ -6,6 +6,9 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Changed
+
+- While any `refuse` rule is configured, a bash command longer than 32,768 characters is refused with a message, instead of being judged by the patterns: a pattern that stalls on a very long line froze the session's `tool_call` check (omp gives it 30 s and fails closed), and one that runs out of backtracking budget answered "no match" and let the command through. Configs without a `refuse` rule are not affected. See [queues](docs/queues.md#agents-commands).
 ### Added
 
 - `examples/omp-coord.json` has two `refuse` rules that protect git's rerere cache, which every worktree of a repository shares: deleting `rr-cache` (`rm`, `find -delete`, `git clean` and the like) and `git rerere clear`, `forget` and `gc` are refused, with a reason that points to `git -c rerere.enabled=false …` for throwaway builds. Reading the cache, `git rerere status`, `diff`, `remaining` and a command that names a throwaway repository under `/tmp` (an `rr-cache` path there, or `git -C`/`GIT_DIR=` for `git rerere`) are allowed; the limits are in the docs. Copy the rules into your `.omp-coord.json` above any `queue` rules to use them; no code or default changed. See [queues](docs/queues.md#example-protecting-gits-rerere-cache).
