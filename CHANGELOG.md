@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-28
+
 ### Changed
 
 - **Breaking:** the extension no longer starts agents' bash commands with `export OMP_COORD_AGENT=<agent id>;`, and no longer sets `OMP_COORD_AGENT` at all. The rewritten command showed up in the conversation, and agents copied the prefix into later calls. Instead `omp-coord run` finds the agent from `PI_SESSION_ID`, the id omp gives each bash call for its agent's conversation, which the extension records on the board (the main session as `Main`, each subagent when its run starts, dropped when it ends). A script that read `OMP_COORD_AGENT` inside an agent's command must read `PI_SESSION_ID` or ask the board instead; `OMP_COORD_AGENT=<name> omp-coord run …` still names the agent for a job started where omp gives no `PI_SESSION_ID`, or one the board doesn't know. Only commands a `queue` rule matches are rewritten now, as before 0.2.3; omp's `bash.patterns` rules and other extensions see every other command as the agent wrote it.
@@ -94,7 +96,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/nledford/omp-coord/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/nledford/omp-coord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nledford/omp-coord/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/nledford/omp-coord/compare/v0.2.2...v0.2.3
