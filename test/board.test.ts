@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { agentEnded, agentStarted, expire, requestSpawn, spawnAllowance, takeNewHolds } from "../src/domain/agents.ts";
 import { sendMessage, takeInbox } from "../src/domain/messages.ts";
 import { type AgentPolicy, type Board, emptyBoard } from "../src/domain/model.ts";
-import { registerSession, removeSession } from "../src/domain/sessions.ts";
+import { agentOfOmpSession, bindOmpSession, registerSession, removeSession } from "../src/domain/sessions.ts";
 
 const MIN = 60_000;
 
@@ -583,5 +583,56 @@ describe("how many of a session's own spawns may run at once (omp's spawn queue)
       now: 0,
     });
     expect(allowance(board, "a")).toBe(3);
+  });
+});
+
+describe("the agent behind an omp session id", () => {
+  test("the main session's id names Main, a running subagent's its own id, and an agent that ended names nobody", () => {
+    const board = boardWith("a", "b");
+    bindOmpSession(board, "a", "omp-main-a");
+    bindOmpSession(board, "b", "omp-main-b");
+    run(board, "a", "Kid");
+    for (const slot of board.slots) if (slot.agentId === "Kid") slot.ompSessionId = "omp-kid";
+    expect(agentOfOmpSession(board, "omp-main-a")).toBe("Main");
+    expect(agentOfOmpSession(board, "omp-main-b")).toBe("Main");
+    expect(agentOfOmpSession(board, "omp-kid")).toBe("Kid");
+    expect(agentOfOmpSession(board, "unknown")).toBeUndefined();
+    agentEnded(board, policy, { sessionId: "a", agentId: "Kid", now: 1 });
+    expect(agentOfOmpSession(board, "omp-kid")).toBeUndefined();
+  });
+
+  test("agentStarted records the run's omp session id on its slot, a revived run too", () => {
+    const board = boardWith("a");
+    requestSpawn(board, policy, {
+      sessionId: "a",
+      parentAgentId: "Main",
+      parentIsSubagent: false,
+      agentType: "task",
+      spawnKey: "Kid",
+      now: 0,
+    });
+    const start = (ompSessionId: string) =>
+      agentStarted(board, policy, {
+        sessionId: "a",
+        agentId: "Kid",
+        parentId: "Main",
+        parentIsSubagent: false,
+        agentType: "task",
+        ompSessionId,
+        now: 1,
+      });
+    start("omp-kid");
+    expect(agentOfOmpSession(board, "omp-kid")).toBe("Kid");
+    agentEnded(board, policy, { sessionId: "a", agentId: "Kid", now: 2 });
+    start("omp-kid-2");
+    expect(agentOfOmpSession(board, "omp-kid-2")).toBe("Kid");
+  });
+
+  test("binding a session again (omp switched its main session) replaces the old id", () => {
+    const board = boardWith("a");
+    bindOmpSession(board, "a", "old");
+    bindOmpSession(board, "a", "new");
+    expect(agentOfOmpSession(board, "old")).toBeUndefined();
+    expect(agentOfOmpSession(board, "new")).toBe("Main");
   });
 });

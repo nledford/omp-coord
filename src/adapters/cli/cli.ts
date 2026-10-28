@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
  * omp-coord command line: runs commands through the shared build and test queues, from `just` recipes, scripts,
- * terminals, or agents' bash calls (which the extension rewrites to go through here), and reports on the scope.
+ * terminals, or agents' bash calls (which the extension rewrites to go through here when a rule queues them), and
+ * reports on the scope.
  *
  *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
  *   omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
@@ -24,6 +25,7 @@ import { EXIT_TIMED_OUT, runJob } from "../../app/job-runner.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { statusView } from "../../domain/overview.ts";
 import { MAX_PRIORITY } from "../../domain/queues.ts";
+import { agentOfOmpSession } from "../../domain/sessions.ts";
 import { osLoad } from "../os/load.ts";
 import { groupRunning } from "../os/process-group.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
@@ -243,14 +245,16 @@ async function run(args: string[]): Promise<number> {
     mkdirSync(join(dir, "s"), { recursive: true, mode: 0o700 });
     const id = randomBytes(4).toString("hex");
     const address = join(dir, "s", `job-${id}.sock`);
+    // omp gives each bash call its agent's session id; the extension recorded which agent that is. A script outside
+    // omp (or one run before the extension bound the id) may name the agent itself.
+    const agent = agentOfOmpSession(store.read(), process.env.PI_SESSION_ID ?? "") || process.env.OMP_COORD_AGENT;
 
     return runJob(
       {
         id,
         queue,
         owner: values.owner || process.env.OMP_COORD_SESSION || null,
-        // set per command by the extension's bash hook
-        ...(process.env.OMP_COORD_AGENT ? { agent: process.env.OMP_COORD_AGENT } : {}),
+        ...(agent ? { agent } : {}),
         ...(values.lane === undefined ? {} : { lane: values.lane }),
         priority,
         ...(values.key === undefined ? {} : { key: values.key }),

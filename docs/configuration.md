@@ -22,7 +22,7 @@
 | `queues.<name>.onDuplicate` | `"refuse"` | `"refuse"` or `"supersede"` a waiting job with the same key. |
 | `queues.<name>.timeoutMinutes` | none | Stop a job's command after this long: SIGTERM to its process group, then SIGKILL to whatever of it is left 10 s later; it exits 124. `--timeout` overrides it per job. |
 | `queues.<name>.loadSlots` | `[]` | `[{ "above": 150, "slots": 1 }]`: fewer slots under load; `0` holds the queue. |
-| `tagAgentCommands` | `false` | Start each agent bash command with `export OMP_COORD_AGENT=<agent id>;`, so each queued job records the agent that queued it (queue lines read `session A/<agent>`). Leave it off when you use omp's `bash.patterns` allow or deny rules (a rewritten command no longer matches them) or another extension that rewrites bash commands (the last rewrite wins). |
+| `tagAgentCommands` | none | Deprecated and ignored: every queued job records the agent that queued it now (on omp 18.12.4 or later), without rewriting commands. Accepted so existing files keep loading; remove it. |
 | `resources.ports` | none | `{ "from", "to", "perSession", "perAgent" (10) }`: each session gets a block of `perSession` ports, each agent a block of `perAgent` from its session's. |
 | `resources.scratch` | none | Root of the scratch folders: `<scratch>/<letter>` per session, `<scratch>/<letter>/<agent id>` per agent. Relative to the config file. |
 | `history.retentionDays` | `30` | Events and decision-log notes older than this are deleted. |

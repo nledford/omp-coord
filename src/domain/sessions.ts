@@ -11,11 +11,23 @@ const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
  */
 export function registerSession(
   board: Board,
-  s: { id: string; pid: number; cwd: string; socket: string; configHash: string; now: number },
+  s: {
+    id: string;
+    pid: number;
+    cwd: string;
+    socket: string;
+    configHash: string;
+    ompSessionId?: string;
+    now: number;
+  },
   ports?: Pick<PortPolicy, "from" | "to" | "perSession">,
 ): string {
   const existing = board.sessions.find(x => x.id === s.id);
-  if (existing) return existing.label;
+  if (existing) {
+    // an older omp-coord's save writes every session without it
+    if (s.ompSessionId !== undefined) existing.ompSessionId = s.ompSessionId;
+    return existing.label;
+  }
   const taken = new Set(board.sessions.map(x => x.label));
   const label = [...LABELS].find(l => !taken.has(l));
   if (!label) throw new Error(`${LABELS.length} sessions are already registered`);
@@ -36,6 +48,7 @@ export function registerSession(
     startedAt: s.now,
     configHash: s.configHash,
     ports: block,
+    ...(s.ompSessionId === undefined ? {} : { ompSessionId: s.ompSessionId }),
   });
   emit(board, s.now, "session_joined", s.id, {
     pid: s.pid,
@@ -43,6 +56,22 @@ export function registerSession(
     ...(block ? { ports: `${block.from}-${block.to}` } : {}),
   });
   return label;
+}
+
+/** Records omp's id for the main session's conversation, replacing the one it had. */
+export function bindOmpSession(board: Board, sessionId: string, ompSessionId: string): void {
+  const session = board.sessions.find(s => s.id === sessionId);
+  if (session) session.ompSessionId = ompSessionId;
+}
+
+/**
+ * The agent whose bash call carries this omp session id (`PI_SESSION_ID`): `Main` for a session's main conversation,
+ * a running subagent's id for its own. Undefined for an id the board doesn't know, such as an agent whose run ended.
+ */
+export function agentOfOmpSession(board: Board, ompSessionId: string): string | undefined {
+  const slot = board.slots.find(s => s.ompSessionId === ompSessionId && s.agentId !== undefined);
+  if (slot) return slot.agentId;
+  return board.sessions.some(s => s.ompSessionId === ompSessionId) ? "Main" : undefined;
 }
 
 /**

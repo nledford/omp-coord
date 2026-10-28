@@ -6,6 +6,18 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the extension no longer starts agents' bash commands with `export OMP_COORD_AGENT=<agent id>;`, and no longer sets `OMP_COORD_AGENT` at all. The rewritten command showed up in the conversation, and agents copied the prefix into later calls. Instead `omp-coord run` finds the agent from `PI_SESSION_ID`, the id omp gives each bash call for its agent's conversation, which the extension records on the board (the main session as `Main`, each subagent when its run starts, dropped when it ends). A script that read `OMP_COORD_AGENT` inside an agent's command must read `PI_SESSION_ID` or ask the board instead; `OMP_COORD_AGENT=<name> omp-coord run …` still names the agent for a job started where omp gives no `PI_SESSION_ID`, or one the board doesn't know. Only commands a `queue` rule matches are rewritten now, as before 0.2.3; omp's `bash.patterns` rules and other extensions see every other command as the agent wrote it.
+
+### Deprecated
+
+- `tagAgentCommands` does nothing and is still accepted, so existing `.omp-coord.json` files keep loading; remove it. Queued jobs record their agent whether it was on or not.
+
+### Fixed
+
+- A job queued by an agent now records the agent whether or not `tagAgentCommands` was on. A board made by an older omp-coord gains the two new columns when this version opens it; while a session of the scope (or an older `omp-coord run`) still uses the old version, its saves drop the recorded ids: the main session's comes back within 2 s, but a subagent's only at its next run, so while any older omp-coord is in use a subagent's jobs may show no agent (display only). omp gives bash calls `PI_SESSION_ID` from 18.12.4 on (the plugin still runs on 18.12.0 to 18.12.3, where jobs record no agent unless a script sets `OMP_COORD_AGENT`).
+
 ## [0.3.1] - 2026-10-27
 
 ### Fixed

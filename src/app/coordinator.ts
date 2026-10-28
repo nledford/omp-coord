@@ -31,7 +31,7 @@ import type { Board, Claim, Note } from "../domain/model.ts";
 import { addNote, type NoteResult } from "../domain/notes.ts";
 import { type AgentPortsResult, agentPorts } from "../domain/ports.ts";
 import { dropJobs, type EnqueueResult, schedule, setJobPriority } from "../domain/queues.ts";
-import { registerSession, removeSession } from "../domain/sessions.ts";
+import { bindOmpSession, registerSession, removeSession } from "../domain/sessions.ts";
 import type { BoardRepository, Clock, Liveness, LoadProbe } from "./ports.ts";
 
 export interface SessionIdentity {
@@ -40,6 +40,8 @@ export interface SessionIdentity {
   cwd: string;
   /** Liveness address this session answers on. */
   address: string;
+  /** omp's id for the main conversation, kept on the board so the runner can tell whose bash call it is. */
+  ompSessionId?: string;
 }
 
 export interface TickResult {
@@ -86,7 +88,15 @@ export class Coordinator {
   #register(b: Board, me: SessionIdentity, now: number): string {
     return registerSession(
       b,
-      { id: me.id, pid: me.pid, cwd: me.cwd, socket: me.address, configHash: this.config.hash, now },
+      {
+        id: me.id,
+        pid: me.pid,
+        cwd: me.cwd,
+        socket: me.address,
+        configHash: this.config.hash,
+        ...(me.ompSessionId === undefined ? {} : { ompSessionId: me.ompSessionId }),
+        now,
+      },
       this.config.resources.ports,
     );
   }
@@ -152,6 +162,11 @@ export class Coordinator {
     return this.repo.transact(b => requestSpawn(b, this.config.agents, { ...req, now: this.clock.now() }));
   }
 
+  /** omp moved this session onto another main conversation (new, resumed or forked): its bash calls carry the new id. */
+  bindOmpSession(sessionId: string, ompSessionId: string): void {
+    this.repo.transact(b => bindOmpSession(b, sessionId, ompSessionId));
+  }
+
   agentStarted(a: {
     sessionId: string;
     agentId: string;
@@ -159,6 +174,7 @@ export class Coordinator {
     parentIsSubagent: boolean;
     agentType: string;
     evalWorker?: boolean;
+    ompSessionId?: string;
   }) {
     return this.repo.transact(b => agentStarted(b, this.config.agents, { ...a, now: this.clock.now() }));
   }
