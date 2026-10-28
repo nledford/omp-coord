@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-28
+
 ### Added
 
 - `examples/omp-coord.json` has two `refuse` rules that protect git's rerere cache, which every worktree of a repository shares: deleting `rr-cache` (`rm`, `find -delete`, `git clean` and the like) and `git rerere clear`, `forget` and `gc` are refused, with a reason that points to `git -c rerere.enabled=false …` for throwaway builds. Reading the cache, `git rerere status`, `diff`, `remaining` and a command that names a throwaway repository under `/tmp` (an `rr-cache` path there, or `git -C`/`GIT_DIR=` for `git rerere`) are allowed; the limits are in the docs. Copy the rules into your `.omp-coord.json` above any `queue` rules to use them; no code or default changed. See [queues](docs/queues.md#example-protecting-gits-rerere-cache).
@@ -104,7 +106,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nledford/omp-coord/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/nledford/omp-coord/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/nledford/omp-coord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nledford/omp-coord/compare/v0.2.3...v0.3.0
