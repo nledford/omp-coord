@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `examples/omp-coord.json` has two `refuse` rules that protect git's rerere cache, which every worktree of a repository shares: deleting `rr-cache` (`rm`, `find -delete`, `git clean` and the like) and `git rerere clear`, `forget` and `gc` are refused, with a reason that points to `git -c rerere.enabled=false …` for throwaway builds. Reading the cache, `git rerere status`, `diff`, `remaining` and a command that names a throwaway repository under `/tmp` (an `rr-cache` path there, or `git -C`/`GIT_DIR=` for `git rerere`) are allowed; the limits are in the docs. Copy the rules into your `.omp-coord.json` above any `queue` rules to use them; no code or default changed. See [queues](docs/queues.md#example-protecting-gits-rerere-cache).
+
 ## [0.3.2] - 2026-10-28
 
 ### Changed
