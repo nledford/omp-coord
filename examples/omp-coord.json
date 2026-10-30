@@ -32,6 +32,24 @@
       "action": "refuse",
       "reason": "git's rerere cache is shared by every worktree and session, and deleting it loses other sessions' recorded resolutions: to keep a throwaway build's resolutions out, run that command with `git -c rerere.enabled=false …`"
     },
+    {
+      "pattern": "(?<![\\w.-])g?sed(?:\\s+-\\S+){0,8}?\\s+(?:-[A-Za-z]*i\\S*|--in-place\\S*)(?=\\s|$)",
+      "action": "refuse",
+      "agents": "sub",
+      "reason": "sed -i rewrites files in place without showing what changed: use the edit tool (read the lines first). For one rewrite across many files, save a script with the write tool and run it from a short command. If the text only mentions it (a commit message, a PR body), put it in a file with the write tool and pass the file"
+    },
+    {
+      "pattern": "(?<![\\w.-])perl(?:\\s+-\\S+){0,8}?\\s+-(?![IMmdDwWxX])\\w*i\\S*(?=\\s|$)",
+      "action": "refuse",
+      "agents": "sub",
+      "reason": "perl -i rewrites files in place without showing what changed: use the edit tool (read the lines first). For one rewrite across many files, save a script with the write tool and run it from a short command. If the text only mentions it (a commit message, a PR body), put it in a file with the write tool and pass the file"
+    },
+    {
+      "pattern": "(?<![\\w.-])python[0-9.]*(?=((?:\\s+-(?![c-]\\b)(?![\\s<])\\S*(?:\\s+(?![-<])[A-Za-z][\\w.]*)?){0,8}))\\1\\s+(?:-c\\b|-(?=\\s*<<)|<<|-\\s)(?=[\\s\\S]*?(?:\\.write_(?:text|bytes)\\(|\\bopen\\((?:[^,()\\n]|\\([^()\\n]*\\))*,\\s*(?:mode\\s*=\\s*)?['\"][wax]))",
+      "action": "refuse",
+      "agents": "sub",
+      "reason": "an inline Python script that writes a file edits it without showing what changed: use the edit tool (read the lines first). For one rewrite across many files, save the script with the write tool and run it from a short command (`python3 /path/script.py`). If the text only mentions it (a commit message, a PR body), put it in a file with the write tool and pass the file"
+    },
     { "pattern": "(^|[;&|(\\s])(npm|pnpm|yarn|bun)\\s+(run\\s+)?test\\b", "action": "queue", "queue": "test" },
     { "pattern": "(^|[;&|(\\s])(npm|pnpm|yarn|bun)\\s+run\\s+build\\b", "action": "queue", "queue": "build" },
     {
@@ -49,6 +67,7 @@
     "ports": { "from": 20000, "to": 20999, "perSession": 200, "perAgent": 10 },
     "scratch": ".omp-coord-scratch"
   },
+  "protect": { "roots": ["."], "allow": [], "agents": "sub" },
   "messages": { "perMinute": 10 },
   "history": { "retentionDays": 30, "maxEvents": 100000 }
 }

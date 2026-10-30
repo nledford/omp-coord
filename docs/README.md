@@ -10,6 +10,7 @@ How it works:
 - [Agent slots and the line](agent-slots.md): caps, holds, revivals, agents started by subagents.
 - [Build and test queues](queues.md): `omp-coord run`, order, lanes, time limits, agents' commands.
 - [Working across sessions](coordination.md): messages, claims, pause, the decision log, ports, crash recovery.
+- [Protected checkouts](protect.md): refusing file-tool writes into the main checkout, and in-place rewrites by shell commands.
 
 Reference:
 

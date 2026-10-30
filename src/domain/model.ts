@@ -159,6 +159,7 @@ export interface BoardEvent {
     | "claimed"
     | "released"
     | "claim_refused"
+    | "write_refused"
     | "note_added";
   /** The omp session concerned; null for build jobs started outside any omp session. */
   sessionId: string | null;
