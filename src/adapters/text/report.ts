@@ -212,7 +212,7 @@ export function formatStats(days: DayStats[]): string {
     );
     for (const [q, s] of Object.entries(d.queues)) {
       lines.push(
-        `  ${q}: ${s.started} started, wait avg ${minutes(s.avgWaitMs)} / max ${minutes(s.maxWaitMs)}; ${s.ended} ended, ${s.failed} failed${s.timedOut ? ` (${s.timedOut} timed out)` : ""}`,
+        `  ${q}: ${s.started} started, wait avg ${minutes(s.avgWaitMs)} / max ${minutes(s.maxWaitMs)}; ${s.ended} ended, ${s.failed} failed${s.timedOut ? ` (${s.timedOut} timed out)` : ""}${s.ofFailures ? `; of the failures: ${s.ofFailures.repeats} repeat an unchanged failure, ${s.ofFailures.intended} intended` : ""}`,
       );
     }
   }

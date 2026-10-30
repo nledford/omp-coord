@@ -24,7 +24,7 @@ import { doctor } from "../../app/doctor.ts";
 import { EXIT_TIMED_OUT, runJob } from "../../app/job-runner.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { statusView } from "../../domain/overview.ts";
-import { MAX_PRIORITY } from "../../domain/queues.ts";
+import { MAX_PRIORITY, parseMeta } from "../../domain/queues.ts";
 import { agentOfOmpSession } from "../../domain/sessions.ts";
 import { osLoad } from "../os/load.ts";
 import { groupRunning } from "../os/process-group.ts";
@@ -45,7 +45,7 @@ const KILL_GRACE_MS = 10_000;
 const DAY = 86_400_000;
 
 const USAGE = `usage:
-  omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command…>
+  omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] [--meta k=v]... -- <command…>
   omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
   omp-coord pause [reason…] | resume | doctor [--fix]`;
 
@@ -206,6 +206,12 @@ async function run(args: string[]): Promise<number> {
   if (!Number.isSafeInteger(priority) || Math.abs(priority) > MAX_PRIORITY) {
     throw new UsageError(`omp-coord run: --priority must be a whole number from -${MAX_PRIORITY} to ${MAX_PRIORITY}`);
   }
+  let meta: ReturnType<typeof parseMeta>;
+  try {
+    meta = parseMeta(values.meta ?? []);
+  } catch (error) {
+    throw new UsageError(`omp-coord run: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const timeoutMs = values.timeout === undefined ? undefined : parseDuration(values.timeout);
   const command = args.slice(split + 1);
 
@@ -258,6 +264,7 @@ async function run(args: string[]): Promise<number> {
         ...(values.lane === undefined ? {} : { lane: values.lane }),
         priority,
         ...(values.key === undefined ? {} : { key: values.key }),
+        ...(meta === undefined ? {} : { meta }),
         command: command.join(" "),
         pid: process.pid,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
@@ -293,6 +300,7 @@ function parseRunFlags(args: string[]) {
       key: { type: "string" },
       owner: { type: "string" },
       timeout: { type: "string" },
+      meta: { type: "string", multiple: true },
     },
   });
 }

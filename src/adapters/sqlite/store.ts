@@ -81,6 +81,7 @@ CREATE TABLE jobs (
   key        TEXT,
   command    TEXT NOT NULL,
   agent      TEXT,
+  meta       TEXT,
   socket     TEXT NOT NULL,
   pid        INTEGER NOT NULL,
   state      TEXT NOT NULL CHECK (state IN ('waiting', 'running', 'superseded')),
@@ -258,6 +259,7 @@ export class BoardStore implements BoardRepository {
         .all()
         .some(c => c.name === column);
     if (!has("jobs", "agent")) this.#db.exec("ALTER TABLE jobs ADD COLUMN agent TEXT");
+    if (!has("jobs", "meta")) this.#db.exec("ALTER TABLE jobs ADD COLUMN meta TEXT");
     if (!has("slots", "unqueued"))
       this.#db.exec("ALTER TABLE slots ADD COLUMN unqueued TEXT CHECK (unqueued IN ('revived', 'eval'))");
     if (!has("sessions", "omp_session")) this.#db.exec("ALTER TABLE sessions ADD COLUMN omp_session TEXT");
@@ -369,6 +371,7 @@ export class BoardStore implements BoardRepository {
             key: string | null;
             command: string;
             agent: string | null;
+            meta: string | null;
             socket: string;
             pid: number;
             state: "waiting" | "running" | "superseded";
@@ -387,6 +390,7 @@ export class BoardStore implements BoardRepository {
           key: r.key ?? undefined,
           command: r.command,
           agent: r.agent ?? undefined,
+          meta: r.meta === null ? undefined : (JSON.parse(r.meta) as Record<string, string>),
           socket: r.socket,
           pid: r.pid,
           state: r.state,
@@ -499,7 +503,7 @@ export class BoardStore implements BoardRepository {
     const sent = db.query("INSERT INTO sent (session_id, at) VALUES (?, ?)");
     for (const x of board.sent) sent.run(x.sessionId, x.at);
     const job = db.query(
-      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, agent, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO jobs (id, queue, owner, lane, priority, key, command, agent, meta, socket, pid, state, since, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const j of board.jobs) {
       job.run(
@@ -511,6 +515,7 @@ export class BoardStore implements BoardRepository {
         j.key ?? null,
         j.command,
         j.agent ?? null,
+        j.meta === undefined ? null : JSON.stringify(j.meta),
         j.socket,
         j.pid,
         j.state,

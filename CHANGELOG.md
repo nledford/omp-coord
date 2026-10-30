@@ -6,6 +6,11 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `omp-coord run --meta k=v` (repeatable, at most 8; the key matches `[a-z][a-z0-9_-]{0,31}`, the value is at most 200 characters on one line) tags a job. The tags go into the `job_queued` and `job_ended` events as `meta`, and `job_ended` now also carries the job's `key`. A script can detect support with `omp-coord --help 2>&1 | grep -q -- '--meta'`. The jobs table gains a nullable `meta` column (no schema version bump).
+- `omp-coord stats` and `/coord stats` add `; of the failures: N repeat an unchanged failure, M intended` to a queue's line when a failed job of that day had tags: a repeat is a failed job whose `fp` tag equals that of an earlier failed job in the same queue, with no successful job of that `fp` in between; intended is `intent=failfirst`.
+
 ## [0.4.1] - 2026-10-30
 
 ### Added

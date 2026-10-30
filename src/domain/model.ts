@@ -181,6 +181,8 @@ export interface Job {
   priority: number;
   /** Jobs with the same key are duplicates (e.g. "<checkout> ci"). */
   key: string | undefined;
+  /** Tags the caller gave (`--meta k=v`), kept in the event log; undefined when none. */
+  meta?: Record<string, string> | undefined;
   /** What runs, for display. */
   command: string;
   /** The runner's liveness socket and process id. */

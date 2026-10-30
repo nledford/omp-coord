@@ -26,7 +26,7 @@
 ## `omp-coord`
 
 ```sh
-omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
+omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] [--meta k=v]... -- <command> [args…]
 omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
 omp-coord pause [reason…] | resume | doctor [--fix]
 ```

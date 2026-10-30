@@ -22,6 +22,8 @@ export interface JobSpec {
   lane?: string;
   priority: number;
   key?: string;
+  /** Tags for the event log. */
+  meta?: Record<string, string>;
   /** For display. */
   command: string;
   pid: number;

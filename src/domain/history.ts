@@ -67,6 +67,8 @@ export interface QueueDay {
   /** Ended with a nonzero exit code, a signal, or a timeout. */
   failed: number;
   timedOut: number;
+  /** Present when any failed job of the day carried `--meta` tags. */
+  ofFailures?: { repeats: number; intended: number };
 }
 
 export interface DayStats {
@@ -80,7 +82,14 @@ export interface DayStats {
   queues: Record<string, QueueDay>;
 }
 
+/**
+ * Per queue and day: failures that repeat an unchanged failure (a failed job with `meta.fp` equal to that of an
+ * earlier failed job of the same queue in the window, with no successful job of that `fp` in between) and failures
+ * marked `meta.intent == "failfirst"`.
+ */
 export function stats(events: BoardEvent[], since: number): { days: DayStats[] } {
+  // Per queue: fingerprints whose latest outcome was a failure.
+  const failing = new Map<string, Set<string>>();
   const days = new Map<string, DayStats & { waits: Record<string, number[]> }>();
   const dayOf = (at: number) => {
     const d = new Date(at);
@@ -117,8 +126,28 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
     if (e.type === "job_ended") {
       const q = queueOf(s, String(e.data.queue));
       q.ended++;
-      if (e.data.exitCode !== 0 || e.data.timedOut === true) q.failed++;
+      const failed = e.data.exitCode !== 0 || e.data.timedOut === true;
+      if (failed) q.failed++;
       if (e.data.timedOut === true) q.timedOut++;
+      const meta = e.data.meta;
+      if (typeof meta === "object" && meta !== null) {
+        const tags = meta as Record<string, unknown>;
+        const fp = typeof tags.fp === "string" ? tags.fp : undefined;
+        const queueName = String(e.data.queue);
+        const set = failing.get(queueName) ?? new Set<string>();
+        failing.set(queueName, set);
+        if (failed) {
+          const counts = q.ofFailures ?? { repeats: 0, intended: 0 };
+          q.ofFailures = counts;
+          if (fp !== undefined) {
+            if (set.has(fp)) counts.repeats++;
+            set.add(fp);
+          }
+          if (tags.intent === "failfirst") counts.intended++;
+        } else if (fp !== undefined) {
+          set.delete(fp);
+        }
+      }
     }
   }
   return {

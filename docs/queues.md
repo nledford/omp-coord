@@ -3,7 +3,7 @@
 `omp-coord run <queue> -- <command>` waits for one of the queue's slots, shared by everything on this machine in the same scope, then runs the command. `just` recipes, scripts and terminals call it; agents' matching bash commands are rewritten to go through it. Queues are set under `queues` in the [configuration](configuration.md).
 
 ```sh
-omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
+omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] [--meta k=v]... -- <command> [args…]
 ```
 
 ## Running a job
@@ -14,6 +14,7 @@ The command runs in its own process group and session, so a time limit stops eve
 
 - **Exit codes**: the command's own, `75` when the job was not run (a refused or superseded duplicate), `124` when its time limit stopped it, `2` for a usage or configuration error.
 - **Owner**: jobs belong to the omp session in `OMP_COORD_SESSION` (set by the extension, so commands an agent runs inherit it) or `--owner`; otherwise to no session ("outside omp").
+- **Tags**: `--meta k=v` (repeatable, at most 8; a repeated key: the last wins) records tags on the job's `job_queued` and `job_ended` events. A key matches `[a-z][a-z0-9_-]{0,31}`; a value is at most 200 characters on one line. Scripts can tag a job with a fingerprint of the code state (`fp`) and mark a deliberate failure (`intent=failfirst`); `omp-coord stats` then adds `; of the failures: N repeat an unchanged failure, M intended` to the queue's line. A repeat is a failed job whose `fp` equals that of an earlier failed job in the same queue inside the stats window, with no successful job of that `fp` in between. Detect support with `omp-coord --help 2>&1 | grep -q -- '--meta'`.
 - **Duplicates**: jobs with the same `--key` (for example `"<checkout> ci"`) are duplicates. One that duplicates a running job is refused; one that duplicates a waiting job is refused or, with `onDuplicate: "supersede"`, replaces it in its place in line.
 
 ## Order
