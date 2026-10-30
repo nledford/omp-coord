@@ -90,6 +90,8 @@ export interface DayStats {
 export function stats(events: BoardEvent[], since: number): { days: DayStats[] } {
   // Per queue: fingerprints whose latest outcome was a failure.
   const failing = new Map<string, Set<string>>();
+  // Tags seen at queue time, for a job_ended that lost them (an older omp-coord still running rewrote the job without them).
+  const queuedMeta = new Map<string, unknown>();
   const days = new Map<string, DayStats & { waits: Record<string, number[]> }>();
   const dayOf = (at: number) => {
     const d = new Date(at);
@@ -116,6 +118,7 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
     if (e.type === "run_started" && typeof e.data.pool === "string") {
       s.peakAgents[e.data.pool] = Math.max(s.peakAgents[e.data.pool] ?? 0, n("used"));
     }
+    if (e.type === "job_queued" && e.data.meta !== undefined) queuedMeta.set(String(e.data.job), e.data.meta);
     if (e.type === "job_started") {
       const q = String(e.data.queue);
       queueOf(s, q).started++;
@@ -129,7 +132,7 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
       const failed = e.data.exitCode !== 0 || e.data.timedOut === true;
       if (failed) q.failed++;
       if (e.data.timedOut === true) q.timedOut++;
-      const meta = e.data.meta;
+      const meta = e.data.meta ?? queuedMeta.get(String(e.data.job));
       if (typeof meta === "object" && meta !== null) {
         const tags = meta as Record<string, unknown>;
         const fp = typeof tags.fp === "string" ? tags.fp : undefined;

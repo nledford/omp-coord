@@ -419,6 +419,38 @@ describe("history from the event log", () => {
       expect(day()).toEndWith("2 failed");
     });
 
+    test("a job_ended that lost its meta takes the tags of its job_queued", () => {
+      const b = boardWith("a");
+      enqueueJob(b, queues, {
+        id: "x",
+        queue: "heavy",
+        owner: "a",
+        priority: 0,
+        command: "c",
+        socket: "/s",
+        pid: 1,
+        meta: { fp: "A" },
+        now: 0,
+      });
+      jobEnded(b, queues, { id: "x", exitCode: 1, now: 1 });
+      // an older omp-coord rewrote the job without its tags before the second one ended
+      enqueueJob(b, queues, {
+        id: "y",
+        queue: "heavy",
+        owner: "a",
+        priority: 0,
+        command: "c",
+        socket: "/s",
+        pid: 1,
+        meta: { fp: "A" },
+        now: 2,
+      });
+      const queued = b.jobs.find(j => j.id === "y");
+      if (queued) queued.meta = undefined;
+      jobEnded(b, queues, { id: "y", exitCode: 1, now: 3 });
+      expect(stats(b.events, 0).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 1, intended: 0 });
+    });
+
     test("no suffix data without meta on any failure", () => {
       const q = outcomes([{ code: 1 }, { code: 0, meta: { fp: "A" } }]);
       expect(q).not.toHaveProperty("ofFailures");

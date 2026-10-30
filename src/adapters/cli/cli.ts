@@ -4,7 +4,7 @@
  * terminals, or agents' bash calls (which the extension rewrites to go through here when a rule queues them), and
  * reports on the scope.
  *
- *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] -- <command> [args…]
+ *   omp-coord run <queue> [--lane L] [--priority N] [--key K] [--owner SESSION] [--timeout 90m] [--meta k=v]... -- <command> [args…]
  *   omp-coord status [--agents | --json] | stats [days] | interrupted [hours] | notes [count] | note <text…>
  *   omp-coord pause [reason…] | resume | doctor [--fix]
  *
