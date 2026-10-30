@@ -70,10 +70,46 @@ describe("agent list", () => {
     });
 
     expect(agentList(board)).toEqual([
-      { id: "Fixer", type: "task", parent: "Main", session: "A", pool: "work", state: "running", since: 0 },
-      { id: "Fixer.Check", type: "reviewer", parent: "Fixer", session: "A", pool: null, state: "running", since: MIN },
-      { id: "Looker", type: "scout", parent: "Main", session: "A", pool: "short", state: "running", since: 2 * MIN },
-      { id: "Pending", type: "task", parent: "Main", session: "A", pool: "work", state: "starting", since: 3 * MIN },
+      {
+        id: "Fixer",
+        type: "task",
+        parent: "Main",
+        session: "A",
+        pool: "work",
+        state: "running",
+        since: 0,
+        overtimeNotices: null,
+      },
+      {
+        id: "Fixer.Check",
+        type: "reviewer",
+        parent: "Fixer",
+        session: "A",
+        pool: null,
+        state: "running",
+        since: MIN,
+        overtimeNotices: null,
+      },
+      {
+        id: "Looker",
+        type: "scout",
+        parent: "Main",
+        session: "A",
+        pool: "short",
+        state: "running",
+        since: 2 * MIN,
+        overtimeNotices: null,
+      },
+      {
+        id: "Pending",
+        type: "task",
+        parent: "Main",
+        session: "A",
+        pool: "work",
+        state: "starting",
+        since: 3 * MIN,
+        overtimeNotices: null,
+      },
     ]);
     expect(formatAgents(board, 5 * MIN).split("\n")).toEqual([
       "Agents (4):",
@@ -211,7 +247,16 @@ describe("status view", () => {
       ],
       line: [{ pool: "work", session: "B", position: 1, since: 4 * MIN, heldUntil: null }],
       agents: [
-        { id: "Fixer", type: "task", parent: "Main", session: "A", pool: "work", state: "running", since: MIN },
+        {
+          id: "Fixer",
+          type: "task",
+          parent: "Main",
+          session: "A",
+          pool: "work",
+          state: "running",
+          since: MIN,
+          overtimeNotices: null,
+        },
         {
           id: "Fixer.Check",
           type: "reviewer",
@@ -220,8 +265,18 @@ describe("status view", () => {
           pool: null,
           state: "running",
           since: 2 * MIN,
+          overtimeNotices: null,
         },
-        { id: "Other", type: "task", parent: "Main", session: "B", pool: "work", state: "running", since: 3 * MIN },
+        {
+          id: "Other",
+          type: "task",
+          parent: "Main",
+          session: "B",
+          pool: "work",
+          state: "running",
+          since: 3 * MIN,
+          overtimeNotices: null,
+        },
       ],
       claims: [{ kind: "branch", target: "fix-x", session: "A", agent: "Fixer", note: "wip", since: 5 * MIN }],
       queues: [

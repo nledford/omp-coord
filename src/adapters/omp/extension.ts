@@ -649,7 +649,7 @@ async function tick(rt: Runtime): Promise<void> {
   if (shared.runtime !== rt) return;
   rt.ticks++;
   const now = Date.now();
-  const { label, inbox, holds, board } = rt.coordinator.tick(
+  const { label, inbox, holds, overtime, board } = rt.coordinator.tick(
     identity(rt.sessionId, rt.ctx.cwd, rt.listener, rt.ompSessionId),
   );
   rt.label = label;
@@ -674,6 +674,24 @@ async function tick(rt: Runtime): Promise<void> {
       rt.pi,
       `[omp-coord] A ${h.pool} slot is free and held for this session until ${clock(h.until)}. ` +
         `Start the agent that was refused now; if you no longer need it, ignore this and the slot passes on at ${clock(h.until)}.`,
+    );
+  }
+
+  for (const n of overtime) {
+    const binding = shared.bindings.get(n.agentId);
+    if (binding)
+      deliver(
+        binding,
+        `omp-coord: you have been running ${n.minutes} min (notice at ${n.noticeAtMinutes}). ` +
+          "Stop at the next clean point: nothing half-pushed, no rebase or merge in progress, worktree committed; " +
+          "write your handoff and report what is done and what is left.",
+      );
+    deliver(
+      rt.pi,
+      `omp-coord: ${n.agentId} has run ${n.minutes} min (notice at ${n.noticeAtMinutes}).` +
+        (binding
+          ? ""
+          : ` It could not be told itself (no live binding); pass the notice on with write agent://${n.agentId}.`),
     );
   }
 

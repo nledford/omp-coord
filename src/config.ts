@@ -220,6 +220,9 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
       startTimeoutMs: count(agents.startTimeoutSeconds ?? 120, "agents.startTimeoutSeconds", fail) * 1000,
       queueSpawns: flag(agents.queueSpawns ?? true, "agents.queueSpawns", fail),
       messagesPerMinute: count(messages.perMinute ?? 10, "messages.perMinute", fail),
+      ...(agents.runtimeNoticeMinutes === undefined || agents.runtimeNoticeMinutes === null
+        ? {}
+        : { runtimeNoticeMs: count(agents.runtimeNoticeMinutes, "agents.runtimeNoticeMinutes", fail) * 60_000 }),
     },
     commands,
     protect,

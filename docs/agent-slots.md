@@ -49,3 +49,9 @@ A subagent may start only the agent types listed under `agents.nested.allow` (by
 ## Exempt agents
 
 Agent types under `agents.exempt` never take a slot. They still start while the scope is paused.
+
+## Runtime notices
+
+Agents that loop or get stuck run for hours and use tokens the whole time. With `agents.runtimeNoticeMinutes` set (off by default), the session that owns a running agent checks on its 2-second tick how long the run has lasted, counted from when its slot was taken. At the limit it sends two messages, once per run: one to the agent ("you have been running N min (notice at M). Stop at the next clean point: nothing half-pushed, no rebase or merge in progress, worktree committed; write your handoff and report what is done and what is left.") and one to the owning session's main conversation ("<agent id> has run N min (notice at M)."). When the agent has no live message channel, the session's notice says so and reminds it to pass the notice on with `write agent://<id>`. The same two messages follow at twice the limit, then nothing more. All pools count, as do exempt reviewers and nested agents. omp-coord never stops an agent; it only asks.
+
+The notices sent are kept on the agent's slot (and in the sending session's memory, because an older omp-coord sharing the board drops the mark when it saves), so no tick or process repeats them. A run that ended and was revived with `write agent://<id>` is a new run and counts from its new start. An agent past twice the limit when first seen gets the second notice only. Each notice is a `run_overtime` event; `omp-coord stats` shows a day's count, and `/coord agents` marks an agent past a notice.

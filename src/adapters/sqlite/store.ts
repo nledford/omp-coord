@@ -50,7 +50,8 @@ CREATE TABLE slots (
   state      TEXT NOT NULL CHECK (state IN ('starting', 'running')),
   since      INTEGER NOT NULL,
   unqueued   TEXT CHECK (unqueued IN ('revived', 'eval')),
-  omp_session TEXT
+  omp_session TEXT,
+  notices    INTEGER CHECK (notices IN (1, 2))
 ) STRICT;
 CREATE TABLE tickets (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -264,6 +265,8 @@ export class BoardStore implements BoardRepository {
       this.#db.exec("ALTER TABLE slots ADD COLUMN unqueued TEXT CHECK (unqueued IN ('revived', 'eval'))");
     if (!has("sessions", "omp_session")) this.#db.exec("ALTER TABLE sessions ADD COLUMN omp_session TEXT");
     if (!has("slots", "omp_session")) this.#db.exec("ALTER TABLE slots ADD COLUMN omp_session TEXT");
+    if (!has("slots", "notices"))
+      this.#db.exec("ALTER TABLE slots ADD COLUMN notices INTEGER CHECK (notices IN (1, 2))");
   }
 
   #maybePruneEvents(now: number): void {
@@ -317,6 +320,7 @@ export class BoardStore implements BoardRepository {
             since: number;
             unqueued: "revived" | "eval" | null;
             omp_session: string | null;
+            notices: 1 | 2 | null;
           },
           []
         >("SELECT * FROM slots ORDER BY id")
@@ -331,6 +335,7 @@ export class BoardStore implements BoardRepository {
           since: r.since,
           ...(r.unqueued ? { unqueued: r.unqueued } : {}),
           ...(r.omp_session ? { ompSessionId: r.omp_session } : {}),
+          ...(r.notices ? { overtimeNotices: r.notices } : {}),
         })),
       waitlist: db
         .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>(
@@ -480,7 +485,7 @@ export class BoardStore implements BoardRepository {
         s.ompSessionId ?? null,
       );
     const slot = db.query(
-      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, unqueued, omp_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO slots (session_id, agent_id, parent_id, agent_type, pool, state, since, unqueued, omp_session, notices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const s of board.slots)
       slot.run(
@@ -493,6 +498,7 @@ export class BoardStore implements BoardRepository {
         s.since,
         s.unqueued ?? null,
         s.ompSessionId ?? null,
+        s.overtimeNotices ?? null,
       );
     const ticket = db.query(
       "INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)",

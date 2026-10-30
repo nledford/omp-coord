@@ -37,7 +37,7 @@ export function formatAgents(board: Board, now: number): string {
     `parent ${a.parent}`,
     a.pool === null ? "outside the caps" : `pool ${a.pool}`,
     a.state,
-    age(now - a.since),
+    age(now - a.since) + (a.overtimeNotices ? ` (past runtime notice ${a.overtimeNotices})` : ""),
   ]);
   const widths = rows[0]?.map((_, c) => Math.max(...rows.map(r => (r[c] as string).length))) ?? [];
   return [
@@ -208,7 +208,7 @@ export function formatStats(days: DayStats[]): string {
         .map(([p, n]) => `${p} ${n}`)
         .join(", ") || "none";
     lines.push(
-      `${d.day}: ${d.refusals} spawn refusal(s), ${d.holdsUsed} held slot(s) used (longest wait ${minutes(d.maxHoldWaitMs)}), peak agents ${peaks}`,
+      `${d.day}: ${d.refusals} spawn refusal(s), ${d.holdsUsed} held slot(s) used (longest wait ${minutes(d.maxHoldWaitMs)}), peak agents ${peaks}${d.overtimeNotices ? `, ${d.overtimeNotices} overtime notices` : ""}`,
     );
     for (const [q, s] of Object.entries(d.queues)) {
       lines.push(

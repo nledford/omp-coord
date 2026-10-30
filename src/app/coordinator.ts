@@ -29,6 +29,7 @@ import { observeLoad } from "../domain/limits.ts";
 import { type SendResult, sendMessage, takeInbox } from "../domain/messages.ts";
 import type { Board, Claim, Note } from "../domain/model.ts";
 import { addNote, type NoteResult } from "../domain/notes.ts";
+import { dueOvertimeNotices, type OvertimeNotice, type SentNotices } from "../domain/overtime.ts";
 import { type AgentPortsResult, agentPorts } from "../domain/ports.ts";
 import { writeRefused } from "../domain/protect.ts";
 import { dropJobs, type EnqueueResult, schedule, setJobPriority } from "../domain/queues.ts";
@@ -49,10 +50,15 @@ export interface TickResult {
   label: string;
   inbox: { from: string; toAgent: string | undefined; text: string; sentAt: number }[];
   holds: { pool: string; until: number }[];
+  /** Runs of this session's agents that just passed their runtime limit; each is returned once. */
+  overtime: OvertimeNotice[];
   board: Board;
 }
 
 export class Coordinator {
+  /** Runtime notices this process sent, so an older omp-coord's save that drops the slot mark cannot repeat them. */
+  readonly #overtimeSent: SentNotices = new Map();
+
   constructor(
     private readonly config: Config,
     private readonly repo: BoardRepository,
@@ -72,18 +78,24 @@ export class Coordinator {
   /**
    * Periodic work for one session: re-registers it if another session dropped it, records the machine's load,
    * expires stale approvals and holds, starts queued jobs a lower load now allows, and takes the messages and new
-   * slot holds waiting for it.
+   * slot holds waiting for it, and finds its agents' runs past the runtime limit.
    */
   tick(me: SessionIdentity): TickResult {
     const load = this.loadProbe.load();
-    return this.repo.transact(b => {
+    const { result, overtime } = this.repo.transact(b => {
       const now = this.clock.now();
       const label = this.#register(b, me, now);
       if (load !== undefined) observeLoad(b, load, now);
       expire(b, this.config.agents, now);
       schedule(b, this.config.queues, now);
-      return { label, inbox: takeInbox(b, me.id), holds: takeNewHolds(b, me.id), board: structuredClone(b) };
+      const overtime = dueOvertimeNotices(b, this.config.agents, me.id, now, this.#overtimeSent);
+      const result = { label, inbox: takeInbox(b, me.id), holds: takeNewHolds(b, me.id), board: structuredClone(b) };
+      return { result, overtime };
     });
+    // remembered only once the change is saved: a tick whose save failed delivers nothing and tries again
+    for (const [key, notice] of overtime.sent) this.#overtimeSent.set(key, notice);
+    for (const key of this.#overtimeSent.keys()) if (!overtime.live.has(key)) this.#overtimeSent.delete(key);
+    return { ...result, overtime: overtime.due };
   }
 
   #register(b: Board, me: SessionIdentity, now: number): string {
