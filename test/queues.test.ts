@@ -5,6 +5,7 @@ import {
   enqueueJob,
   jobEnded,
   orderWaiting,
+  parseMeta,
   positionOf,
   type QueuePolicy,
   setJobPriority,
@@ -28,7 +29,14 @@ let next = 0;
 function enqueue(
   board: Board,
   q: ReturnType<typeof queues>,
-  j: { owner?: string | null; lane?: string; priority?: number; key?: string; now?: number },
+  j: {
+    owner?: string | null;
+    lane?: string;
+    priority?: number;
+    key?: string;
+    meta?: Record<string, string>;
+    now?: number;
+  },
 ) {
   const id = `j${++next}`;
   const r = enqueueJob(board, q, {
@@ -38,6 +46,7 @@ function enqueue(
     ...(j.lane === undefined ? {} : { lane: j.lane }),
     priority: j.priority ?? 0,
     ...(j.key === undefined ? {} : { key: j.key }),
+    ...(j.meta === undefined ? {} : { meta: j.meta }),
     command: "cargo xtask ci",
     socket: `/s/${id}`,
     pid: 1,
@@ -228,5 +237,41 @@ describe("fair-share history", () => {
       2,
     );
     expect(board.served).toEqual([]);
+  });
+});
+
+describe("job meta tags", () => {
+  test("parseMeta keeps pairs, lets the last repeat win and returns nothing for no pairs", () => {
+    expect(parseMeta([])).toBeUndefined();
+    expect(parseMeta(["fp=abc", "intent=failfirst", "fp=def=x"])).toEqual({ fp: "def=x", intent: "failfirst" });
+    expect(parseMeta(["a-b_1=" + "x".repeat(200)])).toEqual({ "a-b_1": "x".repeat(200) });
+    expect(parseMeta(["k="])).toEqual({ k: "" });
+  });
+
+  test("parseMeta refuses a bad key, a missing =, a long or multi-line value and more than 8 pairs", () => {
+    expect(() => parseMeta(["novalue"])).toThrow(/k=v/);
+    expect(() => parseMeta(["Upper=1"])).toThrow(/key/);
+    expect(() => parseMeta(["1a=1"])).toThrow(/key/);
+    expect(() => parseMeta(["=1"])).toThrow(/key/);
+    expect(() => parseMeta([`${"k".repeat(33)}=1`])).toThrow(/key/);
+    expect(() => parseMeta([`k=${"x".repeat(201)}`])).toThrow(/200/);
+    expect(() => parseMeta(["k=a\nb"])).toThrow(/newline/);
+    expect(() => parseMeta(Array.from({ length: 9 }, (_, i) => `k${i}=1`))).toThrow(/at most 8/);
+    expect(parseMeta(Array.from({ length: 8 }, (_, i) => `k${i}=1`))).toBeDefined();
+  });
+
+  test("job_queued carries the meta, and job_ended carries meta and key; neither field appears without them", () => {
+    const q = queues();
+    const b = emptyBoard();
+    const tagged = enqueue(b, q, { key: "w test", meta: { fp: "f1" } });
+    jobEnded(b, q, { id: tagged.id, exitCode: 1, now: MIN });
+    const plain = enqueue(b, q, { now: MIN });
+    jobEnded(b, q, { id: plain.id, exitCode: 0, now: 2 * MIN });
+    const of = (type: string, id: string) => b.events.find(e => e.type === type && e.data.job === id)?.data;
+    expect(of("job_queued", tagged.id)).toMatchObject({ meta: { fp: "f1" } });
+    expect(of("job_ended", tagged.id)).toMatchObject({ exitCode: 1, key: "w test", meta: { fp: "f1" } });
+    expect(of("job_queued", plain.id)).not.toHaveProperty("meta");
+    expect(of("job_ended", plain.id)).not.toHaveProperty("meta");
+    expect(of("job_ended", plain.id)).not.toHaveProperty("key");
   });
 });

@@ -310,3 +310,39 @@ describe("session liveness", () => {
     expect(await isAlive(path)).toBe(false);
   });
 });
+
+describe("job meta in the store", () => {
+  const job = (id: string, meta: Record<string, string> | undefined) => ({
+    id,
+    queue: "heavy",
+    owner: "a",
+    agent: undefined,
+    lane: "normal",
+    priority: 0,
+    key: undefined,
+    meta,
+    command: "cargo x",
+    socket: `/s/${id}`,
+    pid: 1,
+    state: "waiting" as const,
+    since: 1,
+    startedAt: undefined,
+  });
+
+  test("a job's meta survives a save, and a board made before the column existed gains it", () => {
+    const db = freshDb();
+    new BoardStore(db).close();
+    const old = new Database(db);
+    old.exec("ALTER TABLE jobs DROP COLUMN meta");
+    old.close();
+    const store = new BoardStore(db);
+    store.transact(b => {
+      join_("a")(b);
+      b.jobs.push(job("j1", { fp: "abc", intent: "failfirst" }), job("j2", undefined));
+    });
+    expect(store.read().jobs.map(j => [j.id, j.meta])).toEqual([
+      ["j1", { fp: "abc", intent: "failfirst" }],
+      ["j2", undefined],
+    ]);
+  });
+});

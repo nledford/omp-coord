@@ -293,3 +293,52 @@ describe("omp-coord status --json and --agents", () => {
     }
   });
 });
+
+describe("omp-coord run --meta", () => {
+  const text = async (stream: ReadableStream | null | undefined) => new Response(stream ?? undefined).text();
+
+  test("--help lists --meta, so a script can detect support", async () => {
+    const { run } = scope({ heavy: { slots: 1 } });
+    const proc = run("--help");
+    const out = (await text(proc.stdout)) + (await text(proc.stderr));
+    expect(out).toContain("--meta k=v");
+  });
+
+  test("the tags and the key reach job_queued and job_ended, and the last of a repeated key wins", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    const proc = run(
+      "run",
+      "heavy",
+      "--key",
+      "w t",
+      "--meta",
+      "fp=aa",
+      "--meta",
+      "intent=failfirst",
+      "--meta",
+      "fp=bb",
+      "--",
+      "sh",
+      "-c",
+      "exit 1",
+    );
+    expect(await proc.exited).toBe(1);
+    const events = new BoardStore(join(root, "state", "cli.db")).events();
+    const queued = events.find(e => e.type === "job_queued");
+    const ended = events.find(e => e.type === "job_ended");
+    expect(queued?.data.meta).toEqual({ fp: "bb", intent: "failfirst" });
+    expect(ended?.data).toMatchObject({ exitCode: 1, key: "w t", meta: { fp: "bb", intent: "failfirst" } });
+  }, 20_000);
+
+  test("a bad --meta is a usage error (exit 2) and runs nothing", async () => {
+    const { root, run } = scope({ heavy: { slots: 1 } });
+    for (const bad of ["fp", "Fp=1", `fp=${"x".repeat(201)}`, "fp=a\nb"]) {
+      const proc = run("run", "heavy", "--meta", bad, "--", "touch", join(root, "ran"));
+      expect(await proc.exited).toBe(2);
+      expect(await text(proc.stderr)).toContain("--meta");
+    }
+    const nine = Array.from({ length: 9 }, (_, i) => ["--meta", `k${i}=1`]).flat();
+    expect(await run("run", "heavy", ...nine, "--", "touch", join(root, "ran")).exited).toBe(2);
+    expect(existsSync(join(root, "ran"))).toBe(false);
+  }, 30_000);
+});

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { formatStats } from "../src/adapters/text/report.ts";
 import { agentEnded, agentStarted, requestSpawn } from "../src/domain/agents.ts";
 import { claim, claimConflict, release } from "../src/domain/claims.ts";
 import { pause, resume } from "../src/domain/control.ts";
@@ -325,6 +326,158 @@ describe("messages to another session's subagent", () => {
 });
 
 describe("history from the event log", () => {
+  describe("failures that were repeats or intended", () => {
+    // Runs one job at a time on the heavy queue: each ends before the next is queued.
+    function outcomes(runs: { code: number; meta?: Record<string, string> }[], at = (i: number) => i * MIN) {
+      const b = boardWith("a");
+      runs.forEach((r, i) => {
+        const id = `m${i}`;
+        enqueueJob(b, queues, {
+          id,
+          queue: "heavy",
+          owner: "a",
+          priority: 0,
+          command: "c",
+          socket: `/s/${id}`,
+          pid: 1,
+          ...(r.meta ? { meta: r.meta } : {}),
+          now: at(i),
+        });
+        jobEnded(b, queues, { id, exitCode: r.code, now: at(i) + 1 });
+      });
+      return stats(b.events, 0).days[0]?.queues.heavy;
+    }
+
+    test("a failure with the fingerprint of an earlier failure is a repeat, and a success of that fingerprint resets it", () => {
+      const q = outcomes([
+        { code: 1, meta: { fp: "A" } },
+        { code: 1, meta: { fp: "A" } }, // repeat
+        { code: 1, meta: { fp: "A" } }, // repeat
+        { code: 1, meta: { fp: "B" } },
+        { code: 0, meta: { fp: "A" } }, // success resets A
+        { code: 1, meta: { fp: "A" } }, // first failure again: not a repeat
+        { code: 1, meta: { fp: "B" } }, // repeat of B (no success in between)
+        { code: 1 }, // no meta: counted as failed only
+      ]);
+      expect(q?.failed).toBe(7);
+      expect(q?.ofFailures).toEqual({ repeats: 3, intended: 0 });
+    });
+
+    test("failfirst failures are intended, and a repeat streak crosses days", () => {
+      const DAY = 86_400_000;
+      const b = boardWith("a");
+      const runs = [
+        { code: 1, meta: { fp: "A", intent: "failfirst" } },
+        { code: 1, meta: { fp: "A" } },
+        { code: 0, meta: { intent: "failfirst" } }, // a success is not an intended failure
+      ];
+      runs.forEach((r, i) => {
+        const id = `d${i}`;
+        const now = 12 * 3_600_000 + i * DAY;
+        enqueueJob(b, queues, {
+          id,
+          queue: "heavy",
+          owner: "a",
+          priority: 0,
+          command: "c",
+          socket: "/s",
+          pid: 1,
+          meta: r.meta,
+          now,
+        });
+        jobEnded(b, queues, { id, exitCode: r.code, now: now + 1 });
+      });
+      const days = stats(b.events, 0).days.map(d => d.queues.heavy?.ofFailures);
+      expect(days).toEqual([{ repeats: 0, intended: 1 }, { repeats: 1, intended: 0 }, undefined]);
+    });
+
+    test("formatStats appends the counts to the queue line, and only when a failure had meta", () => {
+      const day = (ofFailures?: { repeats: number; intended: number }) =>
+        formatStats([
+          {
+            day: "2026-10-30",
+            refusals: 0,
+            holdsUsed: 0,
+            maxHoldWaitMs: 0,
+            peakAgents: {},
+            queues: {
+              test: {
+                started: 2,
+                avgWaitMs: 0,
+                maxWaitMs: 0,
+                ended: 2,
+                failed: 2,
+                timedOut: 0,
+                ...(ofFailures ? { ofFailures } : {}),
+              },
+            },
+          },
+        ]);
+      expect(day({ repeats: 12, intended: 5 })).toEndWith(
+        "2 failed; of the failures: 12 repeat an unchanged failure, 5 intended",
+      );
+      expect(day()).toEndWith("2 failed");
+    });
+
+    test("a job_ended that lost its meta takes the tags of its job_queued", () => {
+      const b = boardWith("a");
+      enqueueJob(b, queues, {
+        id: "x",
+        queue: "heavy",
+        owner: "a",
+        priority: 0,
+        command: "c",
+        socket: "/s",
+        pid: 1,
+        meta: { fp: "A" },
+        now: 0,
+      });
+      jobEnded(b, queues, { id: "x", exitCode: 1, now: 1 });
+      // an older omp-coord rewrote the job without its tags before the second one ended
+      enqueueJob(b, queues, {
+        id: "y",
+        queue: "heavy",
+        owner: "a",
+        priority: 0,
+        command: "c",
+        socket: "/s",
+        pid: 1,
+        meta: { fp: "A" },
+        now: 2,
+      });
+      const queued = b.jobs.find(j => j.id === "y");
+      if (queued) queued.meta = undefined;
+      jobEnded(b, queues, { id: "y", exitCode: 1, now: 3 });
+      expect(stats(b.events, 0).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 1, intended: 0 });
+    });
+
+    test("no suffix data without meta on any failure", () => {
+      const q = outcomes([{ code: 1 }, { code: 0, meta: { fp: "A" } }]);
+      expect(q).not.toHaveProperty("ofFailures");
+    });
+
+    test("the stats window starts the streak: an earlier failure outside it is not counted", () => {
+      const b = boardWith("a");
+      for (const [i, t] of [0, 10 * MIN].entries()) {
+        const id = `w${i}`;
+        enqueueJob(b, queues, {
+          id,
+          queue: "heavy",
+          owner: "a",
+          priority: 0,
+          command: "c",
+          socket: `/s/${id}`,
+          pid: 1,
+          meta: { fp: "A" },
+          now: t,
+        });
+        jobEnded(b, queues, { id, exitCode: 1, now: t + 1 });
+      }
+      expect(stats(b.events, 5 * MIN).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 0, intended: 0 });
+      expect(stats(b.events, 0).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 1, intended: 0 });
+    });
+  });
+
   function log(fill: (b: Board) => void): BoardEvent[] {
     const b = boardWith("a", "b");
     fill(b);

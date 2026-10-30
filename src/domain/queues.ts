@@ -47,10 +47,36 @@ export interface JobRequest {
   lane?: string;
   priority: number;
   key?: string;
+  meta?: Record<string, string>;
   command: string;
   socket: string;
   pid: number;
   now: number;
+}
+
+export const MAX_META = 8;
+const META_KEY = /^[a-z][a-z0-9_-]{0,31}$/;
+const MAX_META_VALUE = 200;
+
+/**
+ * Parses repeated `--meta k=v` values into tags (a repeated key: the last wins). Throws an Error naming the problem:
+ * more than `MAX_META` pairs, no `=`, a key outside `[a-z][a-z0-9_-]{0,31}`, a value over 200 characters or with a
+ * newline. Returns undefined for no pairs.
+ */
+export function parseMeta(pairs: string[]): Record<string, string> | undefined {
+  if (pairs.length > MAX_META) throw new Error(`--meta may be given at most ${MAX_META} times`);
+  const meta: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq < 0) throw new Error(`--meta takes k=v, not "${pair}"`);
+    const k = pair.slice(0, eq);
+    const v = pair.slice(eq + 1);
+    if (!META_KEY.test(k)) throw new Error(`--meta key "${k}" must match [a-z][a-z0-9_-]{0,31}`);
+    if (v.length > MAX_META_VALUE) throw new Error(`--meta ${k}: the value is over ${MAX_META_VALUE} characters`);
+    if (/[\r\n]/.test(v)) throw new Error(`--meta ${k}: the value must not contain a newline`);
+    meta[k] = v;
+  }
+  return Object.keys(meta).length ? meta : undefined;
 }
 
 export type EnqueueResult = { ok: true } | { ok: false; reason: string };
@@ -86,6 +112,7 @@ export function enqueueJob(board: Board, queues: Queues, req: JobRequest): Enque
     lane,
     priority: req.priority,
     key: req.key,
+    meta: req.meta,
     command: req.command,
     socket: req.socket,
     pid: req.pid,
@@ -100,6 +127,7 @@ export function enqueueJob(board: Board, queues: Queues, req: JobRequest): Enque
     priority: req.priority,
     ...(req.key === undefined ? {} : { key: req.key }),
     ...(req.agent === undefined ? {} : { agent: req.agent }),
+    ...(req.meta === undefined ? {} : { meta: req.meta }),
   });
   schedule(board, queues, req.now);
   return { ok: true };
@@ -128,6 +156,8 @@ export function jobEnded(
       queue: job.queue,
       exitCode: j.exitCode,
       ranMs: j.now - (job.startedAt ?? j.now),
+      ...(job.key === undefined ? {} : { key: job.key }),
+      ...(job.meta === undefined ? {} : { meta: job.meta }),
       ...(j.timedOut ? { timedOut: true } : {}),
     });
   } else if (job.state === "waiting") {
