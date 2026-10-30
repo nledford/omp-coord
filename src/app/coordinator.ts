@@ -30,6 +30,7 @@ import { type SendResult, sendMessage, takeInbox } from "../domain/messages.ts";
 import type { Board, Claim, Note } from "../domain/model.ts";
 import { addNote, type NoteResult } from "../domain/notes.ts";
 import { type AgentPortsResult, agentPorts } from "../domain/ports.ts";
+import { writeRefused } from "../domain/protect.ts";
 import { dropJobs, type EnqueueResult, schedule, setJobPriority } from "../domain/queues.ts";
 import { bindOmpSession, registerSession, removeSession } from "../domain/sessions.ts";
 import type { BoardRepository, Clock, Liveness, LoadProbe } from "./ports.ts";
@@ -135,6 +136,11 @@ export class Coordinator {
     const conflict = claimConflict(this.repo.read(), q);
     if (conflict) this.repo.transact(b => claimRefused(b, q.sessionId, conflict, this.clock.now()));
     return conflict;
+  }
+
+  /** Records that a file tool's write was refused by the `protect` guard (for the event log). */
+  recordWriteRefused(sessionId: string, agentId: string, tool: string, paths: string[]): void {
+    this.repo.transact(b => writeRefused(b, sessionId, { agentId, tool, paths, now: this.clock.now() }));
   }
 
   note(sessionId: string | null, author: string, text: string): NoteResult {

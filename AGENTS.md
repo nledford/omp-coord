@@ -36,6 +36,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/domain/model.ts` | The `Board` (sessions, agent slots, the line, messages, jobs, pause, claims, notes, port blocks, the latest load), policy types, `BoardEvent` and `emit`. |
 | `src/domain/sessions.ts`, `agents.ts`, `messages.ts`, `queues.ts` | Pure transitions over the `Board`, one concern each. No I/O, no clock; callers pass `now`. Transitions append `BoardEvent`s. |
 | `src/domain/control.ts`, `limits.ts`, `claims.ts`, `notes.ts`, `ports.ts` | Pause and resume; load-aware limits; claims and the command-text guard; the decision log; port blocks. |
+| `src/domain/protect.ts` | Which file-tool writes (`edit`, `write`, `ast_edit`) and which state-changing `git` commands in a bash call hit a protected checkout: the targets of a call or the folder a command runs in, and the decision from the resolved paths. Symlinks and nested checkouts come from the adapter. |
 | `src/domain/overview.ts` | The board as plain data: `statusView` (what `omp-coord status --json` prints; its field names are contract) and `agentList` (the running agents, for text and JSON). |
 | `src/domain/history.ts` | Reports from the event log: agents interrupted by a session leaving, daily statistics. |
 | `src/domain/commands.ts` | Decides what happens to an agent's bash command: allow, refuse, or rewrite to run through a queue. |

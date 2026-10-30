@@ -10,15 +10,25 @@
  * one registration, and every binding is kept so a message can reach the subagent it is for.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { spawnAllowance } from "../../domain/agents.ts";
-import { decideCommand } from "../../domain/commands.ts";
+import { decideCommand, MAX_CHECKED_COMMAND } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
+import {
+  canonicalWith,
+  decideWrite,
+  type GuardFacts,
+  gitChange,
+  resolveCwd,
+  type WriteDecision,
+  type WriteGuard,
+  writeTargets,
+} from "../../domain/protect.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
 import {
@@ -31,7 +41,7 @@ import {
   formatStatus,
 } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
-import type { ExtensionAPI, ExtensionContext, Timer, ToolResult } from "./api.ts";
+import type { ExtensionAPI, ExtensionContext, Timer, ToolCallEvent, ToolResult } from "./api.ts";
 import { loadSettingHandle, type SpawnQueue, spawnQueue } from "./spawn-queue.ts";
 
 /**
@@ -194,14 +204,15 @@ export default function ompCoord(pi: ExtensionAPI): void {
 
   pi.on("tool_call", (event, ctx) => {
     const rt = shared.runtime;
-    if (!rt || event.toolName !== "bash") return undefined;
-    const command = event.input.command;
+    if (!rt) return undefined;
+    if (event.toolName !== "bash") return guardWrite(rt, event, ctx);
+    const command = event.input?.command;
     if (typeof command !== "string") return undefined;
     // the id must be on the board before the command can reach `omp-coord run`, whatever event announced a switch
     if (ctx.agent.kind === "main") syncMainSession(rt, ctx);
 
     try {
-      const cwd = typeof event.input.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
+      const cwd = typeof event.input?.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
       const held = rt.coordinator.checkCommand({
         sessionId: rt.sessionId,
         command,
@@ -220,12 +231,15 @@ export default function ompCoord(pi: ExtensionAPI): void {
     } catch (error) {
       notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
     }
+    const gitHeld = guardGit(rt, ctx, command, event.input?.cwd);
+    if (gitHeld) return gitHeld;
 
-    const decision = decideCommand(rt.config.commands, command, {
-      ...RUNNER,
-      owner: rt.sessionId,
-      config: rt.config.source,
-    });
+    const decision = decideCommand(
+      rt.config.commands,
+      command,
+      { ...RUNNER, owner: rt.sessionId, config: rt.config.source },
+      ctx.agent.kind,
+    );
     if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
     // Only a queued command is rewritten. Which agent runs it needs no rewrite: omp gives every bash call its agent's
     // session id (`PI_SESSION_ID`), and the board maps that id to the agent (`session_start`, `agent_start`).
@@ -707,6 +721,85 @@ function deliver(binding: ExtensionAPI, content: string): void {
 
 function notify(rt: Runtime, message: string, type: "info" | "warning" | "error"): void {
   if (rt.ctx.hasUI) rt.ctx.ui.notify(message, type);
+}
+
+/**
+ * The `protect` guard for the file tools (`edit`, `write`, `ast_edit`, `apply_patch`): a write into a protected
+ * checkout is blocked with a reason naming the resolved path.
+ */
+function guardWrite(
+  rt: Runtime,
+  event: ToolCallEvent,
+  ctx: ExtensionContext,
+): { block: true; reason: string } | undefined {
+  if (!rt.config.protect) return undefined;
+  let targets: string[] | undefined;
+  try {
+    targets = writeTargets(event.toolName, event.input ?? {});
+  } catch (error) {
+    notify(rt, `omp-coord could not read a ${event.toolName} call: ${describe(error)}`, "error");
+    return undefined;
+  }
+  if (!targets || targets.length === 0) return undefined;
+  return refuseProtected(rt, ctx, event.toolName, targets, ctx.cwd, (guard, facts) =>
+    decideWrite(guard, ctx.agent.kind, event.toolName, targets, facts),
+  );
+}
+
+/**
+ * The `protect` guard for a bash command's state-changing `git`: it must not run in a protected checkout. A command
+ * over the length cap is left to `decideCommand`, which refuses it while a refuse rule exists.
+ */
+function guardGit(
+  rt: Runtime,
+  ctx: ExtensionContext,
+  command: string,
+  inputCwd: unknown,
+): { block: true; reason: string } | undefined {
+  if (!rt.config.protect || command.length > MAX_CHECKED_COMMAND || !/\bgit\b/.test(command)) return undefined;
+  const cwd = typeof inputCwd === "string" ? resolveCwd(ctx.cwd, inputCwd, homedir()) : ctx.cwd;
+  return refuseProtected(rt, ctx, "bash", [], cwd, (guard, facts) =>
+    gitChange(guard, ctx.agent.kind, command, cwd, facts),
+  );
+}
+
+/**
+ * Judges a call with the disk's facts and blocks it on a refusal. Like every guard here it fails open: a check that
+ * throws lets the call run; but once the decision is "refuse", failing to log it never lets the call through.
+ */
+function refuseProtected(
+  rt: Runtime,
+  ctx: ExtensionContext,
+  tool: string,
+  shown: string[],
+  cwd: string,
+  judge: (guard: WriteGuard, facts: GuardFacts) => WriteDecision,
+): { block: true; reason: string } | undefined {
+  const guard = rt.config.protect;
+  if (!guard) return undefined;
+  let decision: WriteDecision;
+  try {
+    decision = judge(guard, {
+      cwd,
+      home: homedir(),
+      canonical: canonicalWith(p => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return undefined;
+        }
+      }),
+      hasGitEntry: dir => existsSync(join(dir, ".git")),
+    });
+  } catch (error) {
+    notify(rt, `omp-coord could not check a ${tool} call: ${describe(error)}`, "error");
+    return undefined;
+  }
+  if (decision.kind === "allow") return undefined;
+  guarded(rt, "record a refused call", () =>
+    rt.coordinator.recordWriteRefused(rt.sessionId, ctx.agent.id, tool, decision.shown ?? shown),
+  );
+  return { block: true, reason: `omp-coord: ${decision.reason}` };
 }
 
 function claimKind(word: string): Claim["kind"] | undefined {

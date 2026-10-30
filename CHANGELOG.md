@@ -6,6 +6,11 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `protect` in `.omp-coord.json`: the extension refuses `edit`, `write`, `ast_edit` and `apply_patch` calls (also through `xd://`) whose target lies in a protected checkout and not in a linked worktree below it, and a bash command whose state-changing `git` (`checkout`, `reset`, `commit`, `clean`, `rebase` and the like) runs there, naming the resolved path or folder. A relative path in the file tools resolves against omp's own folder, not the `cwd` of an agent's bash calls, and a bash call without a `cwd` runs there too, so an agent told to work in a worktree edited or reset the main checkout. Known gaps, in [protect](docs/protect.md#what-it-cannot-see): a shell command's file writes (`cat >`, `cp`, `mv`) and `eval`, the `eval` tool and `lsp` write without a file-tool call to judge; a git folder the shell computes (`cd "$W"`, `git -C $(pwd)`) is not judged; the guard fails open when its own check throws. Subagents only unless `protect.agents` is `"all"`; each refusal is a `write_refused` event naming the agent. Without `protect` nothing changes. The guard reads paths and command text, so it stops the usual forms, not a determined dodge; what it cannot see is listed in [protect](docs/protect.md).
+- A `commands` rule may set `"agents": "sub"` to apply to subagents' commands only (default `"all"`). `examples/omp-coord.json` has three such `refuse` rules for in-place rewrites (`sed -i`, `perl -i`, an inline Python script that writes a file), which agents used instead of the edit tool; copy them into your file to use them.
+
 ## [0.4.0] - 2026-10-28
 
 ### Added

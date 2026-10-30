@@ -3,10 +3,13 @@
  * queue (`omp-coord run <queue> -- sh -c '<command>'`), so it waits for a slot inside the bash call instead of
  * starting at once. omp's `tool_call` check must answer within 30 s, so waiting there is not an option.
  */
-/** What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue. */
+/**
+ * What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue.
+ * `agents: "sub"` limits the rule to subagents' commands (the main agent's run as if it were not there); the default is all.
+ */
 export type CommandRule =
-  | { pattern: RegExp; action: "refuse"; reason: string }
-  | { pattern: RegExp; action: "queue"; queue: string; lane: string | undefined };
+  | { pattern: RegExp; action: "refuse"; reason: string; agents?: "all" | "sub" }
+  | { pattern: RegExp; action: "queue"; queue: string; lane: string | undefined; agents?: "all" | "sub" };
 
 export type CommandDecision =
   | { kind: "allow" }
@@ -33,16 +36,22 @@ export interface Runner {
  */
 export const MAX_CHECKED_COMMAND = 32_768;
 
-export function decideCommand(rules: CommandRule[], command: string, runner: Runner): CommandDecision {
+export function decideCommand(
+  rules: CommandRule[],
+  command: string,
+  runner: Runner,
+  agentKind: "main" | "sub" = "sub",
+): CommandDecision {
   // Already queued: a command that runs `omp-coord run`, or one this extension rewrote.
   if (/(^|[;&|(\s'"/])omp-coord'?\s+'?run\b/.test(command) || runner.argv.every(a => command.includes(a)))
     return { kind: "allow" };
-  if (command.length > MAX_CHECKED_COMMAND && rules.some(r => r.action === "refuse"))
+  const applies = (r: CommandRule) => r.agents !== "sub" || agentKind === "sub";
+  if (command.length > MAX_CHECKED_COMMAND && rules.some(r => r.action === "refuse" && applies(r)))
     return {
       kind: "refuse",
       reason: `the command is ${command.length} characters, over the ${MAX_CHECKED_COMMAND} that omp-coord's refuse rules can check: create the file with the write tool and run it from a short command`,
     };
-  const rule = rules.find(r => r.pattern.test(command));
+  const rule = rules.find(r => applies(r) && r.pattern.test(command));
   if (!rule) return { kind: "allow" };
   if (rule.action === "refuse") return { kind: "refuse", reason: rule.reason };
   const wrapped = [

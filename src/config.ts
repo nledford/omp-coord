@@ -5,11 +5,12 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import type { CommandRule } from "./domain/commands.ts";
 import type { LoadLimit } from "./domain/limits.ts";
 import type { AgentPolicy } from "./domain/model.ts";
 import type { PortPolicy } from "./domain/ports.ts";
+import type { WriteGuard } from "./domain/protect.ts";
 import type { QueuePolicy, Queues } from "./domain/queues.ts";
 
 export const CONFIG_FILE = ".omp-coord.json";
@@ -24,6 +25,8 @@ export interface Config {
   agents: AgentPolicy;
   /** Rules for agents' bash commands, first match wins. */
   commands: CommandRule[];
+  /** Checkouts the agents' file tools may not write to; undefined when no `protect` is configured. */
+  protect: WriteGuard | undefined;
   /** Build and test queues, machine-wide within the scope. */
   queues: Queues;
   /** Port ranges and scratch folders handed to sessions and their agents. */
@@ -135,8 +138,11 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
     } catch (e) {
       return fail(`${field}.pattern`, `is not a valid regular expression (${e instanceof Error ? e.message : e})`);
     }
+    const agentsText = rule.agents ?? "all";
+    if (agentsText !== "all" && agentsText !== "sub") fail(`${field}.agents`, `must be "all" or "sub"`);
+    const agents = agentsText as "all" | "sub";
     if (rule.action === "refuse")
-      return { pattern, action: "refuse", reason: str(rule.reason, `${field}.reason`, fail) };
+      return { pattern, action: "refuse", reason: str(rule.reason, `${field}.reason`, fail), agents };
     if (rule.action !== "queue") return fail(`${field}.action`, `must be "refuse" or "queue"`);
     const queue = str(rule.queue, `${field}.queue`, fail);
     const policy = queues[queue];
@@ -144,8 +150,39 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
     const lane = rule.lane === undefined ? undefined : str(rule.lane, `${field}.lane`, fail);
     if (lane !== undefined && !policy.lanes.includes(lane))
       fail(`${field}.lane`, `names no lane of queue ${queue} (${policy.lanes.join(", ")})`);
-    return { pattern, action: "queue", queue, lane };
+    return { pattern, action: "queue", queue, lane, agents };
   });
+
+  let protect: WriteGuard | undefined;
+  if (root.protect !== undefined) {
+    const p = obj(root.protect, "protect", fail);
+    const roots = strList(p.roots, "protect.roots", fail);
+    if (roots.length === 0) fail("protect.roots", "must list at least one folder");
+    const agentsText = p.agents ?? "sub";
+    if (agentsText !== "sub" && agentsText !== "all") fail("protect.agents", `must be "sub" or "all"`);
+    protect = {
+      roots: roots.map(r => resolve(dirname(source), r)),
+      allow: strList(p.allow ?? [], "protect.allow", fail).map((a, i) => {
+        const entry = a.replace(/^(?:\.\/)+/, "");
+        const bare = entry.replace(/\/+$/, "");
+        if (
+          bare === "" ||
+          bare.startsWith("/") ||
+          bare.includes("\\") ||
+          posix.normalize(bare) !== bare ||
+          bare === "." ||
+          bare.startsWith("../") ||
+          bare === ".."
+        )
+          fail(
+            `protect.allow[${i}]`,
+            "must be a file or folder below a root, written relative to it with / separators (no leading /, no .. or . parts, no doubled /)",
+          );
+        return entry;
+      }),
+      agents: agentsText as WriteGuard["agents"],
+    };
+  }
 
   const resources = obj(root.resources ?? {}, "resources", fail);
   let ports: PortPolicy | undefined;
@@ -185,6 +222,7 @@ export function parseConfig(raw: unknown, source: string, hash = "none"): Config
       messagesPerMinute: count(messages.perMinute ?? 10, "messages.perMinute", fail),
     },
     commands,
+    protect,
     queues,
     resources: { ports, scratch },
     history: {
