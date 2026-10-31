@@ -107,6 +107,11 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
     (s.queues[q] ??= { started: 0, avgWaitMs: 0, maxWaitMs: 0, ended: 0, failed: 0, timedOut: 0 });
 
   for (const e of events) {
+    // Tags are indexed from the whole log, so a job queued before the window still explains its end inside it.
+    if (e.type === "job_queued") {
+      if (e.data.meta === undefined) queuedMeta.delete(String(e.data.job));
+      else queuedMeta.set(String(e.data.job), e.data.meta);
+    }
     if (e.at < since) continue;
     const s = dayOf(e.at);
     const n = (k: string) => (typeof e.data[k] === "number" ? (e.data[k] as number) : 0);
@@ -118,7 +123,6 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
     if (e.type === "run_started" && typeof e.data.pool === "string") {
       s.peakAgents[e.data.pool] = Math.max(s.peakAgents[e.data.pool] ?? 0, n("used"));
     }
-    if (e.type === "job_queued" && e.data.meta !== undefined) queuedMeta.set(String(e.data.job), e.data.meta);
     if (e.type === "job_started") {
       const q = String(e.data.queue);
       queueOf(s, q).started++;
@@ -132,7 +136,9 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
       const failed = e.data.exitCode !== 0 || e.data.timedOut === true;
       if (failed) q.failed++;
       if (e.data.timedOut === true) q.timedOut++;
-      const meta = e.data.meta ?? queuedMeta.get(String(e.data.job));
+      const jobId = String(e.data.job);
+      const meta = e.data.meta ?? queuedMeta.get(jobId);
+      queuedMeta.delete(jobId);
       if (typeof meta === "object" && meta !== null) {
         const tags = meta as Record<string, unknown>;
         const fp = typeof tags.fp === "string" ? tags.fp : undefined;

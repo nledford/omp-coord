@@ -161,7 +161,7 @@ export class Coordinator {
   }
 
   stats(sinceMs: number): DayStats[] {
-    return stats(this.repo.events(this.clock.now() - sinceMs), 0).days;
+    return stats(this.repo.events(), this.clock.now() - sinceMs).days;
   }
 
   requestSpawn(req: Omit<SpawnRequest, "now">): SpawnDecision {
