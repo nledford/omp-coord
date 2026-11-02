@@ -11,7 +11,7 @@ These tables are rebuilt as sessions come and go; their layout is not part of th
 | Table | Rows |
 |---|---|
 | `sessions` | Live sessions: `id`, `label` (A, B…), `pid`, `cwd`, `socket`, `started_at`, `config_hash` (of the `.omp-coord.json` it read), `ports_from`/`ports_to`. |
-| `slots` | Agent slots held: `session_id`, `agent_id`, `parent_id`, `agent_type`, `pool` (null outside the caps), `state` (`starting` or `running`), `since`, `notices` (runtime notices sent for the run: null, 1 or 2). |
+| `slots` | Agent slots held: `session_id`, `agent_id`, `parent_id`, `agent_type`, `pool` (null outside the caps), `state` (`starting` or `running`), `since`, `notices` (the highest runtime-notice level reached for the run: null, 1 or 2 — a run first seen past twice the limit gets only notice 2). |
 | `tickets` | The line: `session_id`, `pool`, `since`, `hold_until` (set while a slot is held for it), `notified`. |
 | `messages` | Messages not yet delivered. |
 | `jobs` | Queued and running build/test jobs: `id`, `queue`, `owner` (session id, or null outside omp), `lane`, `priority`, `key`, `command`, `agent` (null when not recorded), `pid`, `state` (`waiting`, `running`, `superseded`), `since`, `started_at`. |
