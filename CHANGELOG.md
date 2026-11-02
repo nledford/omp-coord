@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-02
+
 ### Added
 
 - `omp-coord run --meta k=v` (repeatable, at most 8; the key matches `[a-z][a-z0-9_-]{0,31}`, the value is at most 200 characters on one line) tags a job. The tags go into the `job_queued` and `job_ended` events as `meta`, and `job_ended` now also carries the job's `key`. A script can detect support with `omp-coord --help 2>&1 | grep -q -- '--meta'`. The jobs table gains a nullable `meta` column (no schema version bump).
@@ -118,7 +120,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/nledford/omp-coord/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/nledford/omp-coord/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nledford/omp-coord/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/nledford/omp-coord/compare/v0.3.1...v0.3.2
