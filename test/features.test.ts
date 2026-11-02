@@ -451,6 +451,55 @@ describe("history from the event log", () => {
       expect(stats(b.events, 0).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 1, intended: 0 });
     });
 
+    test("tags of a job queued before the window still count when it ends inside it", () => {
+      const b = boardWith("a");
+      for (const [id, t] of [
+        ["p", 0],
+        ["q", 10 * MIN],
+      ] as const) {
+        enqueueJob(b, queues, {
+          id,
+          queue: "heavy",
+          owner: "a",
+          priority: 0,
+          command: "c",
+          socket: "/s",
+          pid: 1,
+          meta: { fp: "A" },
+          now: t,
+        });
+        const j = b.jobs.find(x => x.id === id);
+        if (j) j.meta = undefined; // an older omp-coord dropped the tags
+        jobEnded(b, queues, { id, exitCode: 1, now: t + 20 * MIN });
+      }
+      // "p" ends at 20 min and "q" at 30; the window starts at 15 min, after both were queued
+      expect(stats(b.events, 15 * MIN).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 1, intended: 0 });
+    });
+
+    test("a reused job id without tags does not inherit the earlier tags, and an ended job's entry is dropped", () => {
+      const b = boardWith("a");
+      const run = (meta: Record<string, string> | undefined, now: number) => {
+        enqueueJob(b, queues, {
+          id: "same",
+          queue: "heavy",
+          owner: "a",
+          priority: 0,
+          command: "c",
+          socket: "/s",
+          pid: 1,
+          ...(meta ? { meta } : {}),
+          now,
+        });
+        const j = b.jobs.find(x => x.id === "same");
+        if (j) j.meta = undefined;
+        jobEnded(b, queues, { id: "same", exitCode: 1, now: now + 1 });
+      };
+      run({ fp: "A" }, 0);
+      run(undefined, 10);
+      run(undefined, 20);
+      expect(stats(b.events, 0).days[0]?.queues.heavy?.ofFailures).toEqual({ repeats: 0, intended: 0 });
+    });
+
     test("no suffix data without meta on any failure", () => {
       const q = outcomes([{ code: 1 }, { code: 0, meta: { fp: "A" } }]);
       expect(q).not.toHaveProperty("ofFailures");
