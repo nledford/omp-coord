@@ -6,7 +6,7 @@ Each session gets a letter (A, B, …) and shows `coord B · work 5/8 · short 1
 
 `coord_send` (or `/coord send B …`) delivers a message into the other session's conversation at its next step, waking it when idle; `all` reaches every other session, and `B/<agent id>` one of session B's subagents. Messages arrive as `[omp-coord] Message from omp session A …`, marked as coming from another session rather than from the user. A message for a subagent that is not running goes to its main session, which can pass it on with `write agent://<id>`.
 
-Only the main session has `coord_send`, `coord_claim`, `coord_release`, `coord_note` and `coord_job_priority`; a subagent reports to its parent, which sends, claims or records for it. A message delivered to a subagent says so.
+Only the main session has `coord_send`, `coord_claim`, `coord_release`, `coord_note` and `coord_job_priority`; a subagent reports to its parent, which sends, claims or records for it. A message delivered to a subagent, and the refusal of its command on another session's claim, say so.
 
 Messages are rate-limited (`messages.perMinute`), and each delivered message starts a turn in an idle session. Text an agent copies into a message from an untrusted source reaches the other session as written.
 

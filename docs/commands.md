@@ -16,7 +16,7 @@
 
 | Tool | Does |
 |---|---|
-| `coord_status` | The same overview as `/coord`. `notes` (a whole number) sets how many latest decisions it lists, and `compact` (true or false) drops folders and times; the main session gets 3 decisions and the full lines, a subagent none and the compact lines. |
+| `coord_status` | The same overview as `/coord`. `notes` (a whole number, at most 50 are available) sets how many latest decisions it lists, and `compact` (true or false) drops folders, start times and the spawn-queue line; the main session gets 3 decisions and the full lines, a subagent none and the compact lines. |
 | `coord_resources` | The calling agent's own ports and scratch folder. |
 | `coord_send` | Message another session or one of its subagents. |
 | `coord_claim`, `coord_release` | Claim or release a branch, worktree or PR. |

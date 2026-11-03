@@ -229,9 +229,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       });
       if (held) {
         const holder = rt.coordinator.board().sessions.find(s => s.id === held.sessionId)?.label ?? "?";
+        // a subagent has no coord_send: it asks through its parent
+        const ask = ctx.agent.kind === "main" ? "ask that session with coord_send" : "tell your parent";
         return {
           block: true,
-          reason: `omp-coord: ${held.kind} ${held.target} is claimed by session ${holder} (${held.agentId})${held.note ? `: ${held.note}` : ""}. Leave it alone; ask that session with coord_send if you need it.`,
+          reason: `omp-coord: ${held.kind} ${held.target} is claimed by session ${holder} (${held.agentId})${held.note ? `: ${held.note}` : ""}. Leave it alone; ${ask} if you need it.`,
         };
       }
     } catch (error) {
@@ -388,7 +390,7 @@ function registerMainTools(pi: ExtensionAPI): void {
     name: "coord_send",
     label: "Message another omp session",
     description:
-      "Messages another omp session in this project: `to` is its letter, `<letter>/<agent id>` or `all`. Short and factual; never just to acknowledge.",
+      "Messages another omp session in this project: `to` is its letter, `<letter>/<agent id>` or `all`; keep it short and factual, never just to acknowledge.",
     parameters: pi.zod.object({
       to: pi.zod.string().describe("Letter, `B/<agent id>`, or `all`"),
       text: pi.zod.string().describe("The message"),
