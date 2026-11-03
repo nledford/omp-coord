@@ -29,7 +29,7 @@ With `agingMinutes`, each that many minutes of waiting adds 1 to a job's priorit
 
 **Lanes**: `--lane` picks one of the queue's `lanes`; earlier lanes go first. Without it, the job goes in the last lane. Lanes are strict: steady front-lane traffic keeps the normal lane waiting.
 
-Agents reorder their own session's waiting jobs with `coord_job_priority`. Priorities run from -1,000,000 to 1,000,000. While the load average is above a queue's `loadSlots` threshold, fewer jobs start.
+The main session reorders its own waiting jobs with `coord_job_priority` (subagents do not have it). Priorities run from -1,000,000 to 1,000,000. While the load average is above a queue's `loadSlots` threshold, fewer jobs start.
 
 ## Nested runs
 

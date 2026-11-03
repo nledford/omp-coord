@@ -6,6 +6,15 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `coord_status` takes `notes` (how many of the latest decisions to list, a whole number, 0 or more) and `compact` (true: no folders, start times or claim times, and no spawn-queue line). Without them the main session gets 3 decisions and the full lines, as before; a subagent gets no decisions and the compact lines.
+
+### Changed
+
+- **Breaking:** a subagent no longer has `coord_send`, `coord_claim`, `coord_release`, `coord_note` and `coord_job_priority`: they are registered in the main session only (`coord_status` and `coord_resources` stay for every agent), which removes their text from every request a subagent makes. A subagent that needs to message another session, claim something, record a decision or reorder a job reports to its parent, which does it. A message delivered to a subagent no longer tells it to answer with `coord_send`.
+- The tool descriptions are one sentence each, and some parameter descriptions are shorter. The tools' text sent with each request falls by about a quarter in the main session and about four fifths in a subagent.
+
 ## [0.4.2] - 2026-11-02
 
 ### Added

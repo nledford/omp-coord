@@ -63,9 +63,9 @@ export interface Events {
   tool_call: (event: ToolCallEvent, ctx: ExtensionContext) => ToolCallResult | Promise<ToolCallResult>;
 }
 
-export interface ZodString {
-  describe(description: string): ZodString;
-  optional(): ZodString;
+export interface ZodType {
+  describe(description: string): ZodType;
+  optional(): ZodType;
 }
 
 export interface ExtensionAPI {
@@ -95,7 +95,9 @@ export interface ExtensionAPI {
     options: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside"; triggerTurn?: boolean },
   ): void;
   zod: {
-    object(shape: Record<string, ZodString>): unknown;
-    string(): ZodString;
+    object(shape: Record<string, ZodType>): unknown;
+    string(): ZodType;
+    number(): ZodType;
+    boolean(): ZodType;
   };
 }
