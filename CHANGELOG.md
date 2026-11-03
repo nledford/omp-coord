@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
 ### Added
 
 - `coord_status` takes `notes` (how many of the latest decisions to list, a whole number, 0 or more) and `compact` (true: no folders, start times or claim times, and no spawn-queue line). Without them the main session gets 3 decisions and the full lines, as before; a subagent gets no decisions and the compact lines.
@@ -129,7 +131,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nledford/omp-coord/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/nledford/omp-coord/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/nledford/omp-coord/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nledford/omp-coord/compare/v0.3.2...v0.4.0
