@@ -691,21 +691,20 @@ async function tick(rt: Runtime): Promise<void> {
     );
   }
 
+  // what the agent is asked to do; the session passes it on when the agent can't be told itself
+  const stop =
+    "Stop at the next clean point: nothing half-pushed, no rebase or merge in progress, worktree committed; " +
+    "write your handoff and report what is done and what is left.";
   for (const n of overtime) {
     const binding = shared.bindings.get(n.agentId);
     if (binding)
-      deliver(
-        binding,
-        `omp-coord: you have been running ${n.minutes} min (notice at ${n.noticeAtMinutes}). ` +
-          "Stop at the next clean point: nothing half-pushed, no rebase or merge in progress, worktree committed; " +
-          "write your handoff and report what is done and what is left.",
-      );
+      deliver(binding, `omp-coord: you have been running ${n.minutes} min (notice at ${n.noticeAtMinutes}). ${stop}`);
     deliver(
       rt.pi,
       `omp-coord: ${n.agentId} has run ${n.minutes} min (notice at ${n.noticeAtMinutes}).` +
         (binding
           ? ""
-          : ` It could not be told itself (no live binding); pass the notice on with write agent://${n.agentId}.`),
+          : ` It could not be told itself (no live binding); pass the notice on with write agent://${n.agentId}: "${stop}"`),
     );
   }
 
