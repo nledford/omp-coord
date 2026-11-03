@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Added
+
+- `agents.runtimeNoticeMinutes` (a whole number of minutes; off when absent): an agent whose run lasts that long, in any pool and nested or exempt ones too, gets one message to stop at the next clean point and write its handoff, and its session gets one notice naming it; both again at twice the limit, then no more. Nothing is stopped. New event `run_overtime` (`agentId`, `agentType`, `pool`, `minutes`, `notice` 1 or 2); `omp-coord stats` and `/coord stats` add `, N overtime notices` to a day that had some; `/coord agents` marks an agent past a notice, and each `agents[]` row of `status --json` gains `overtimeNotices` (`null`, `1` or `2`), the highest notice level reached. The slots table gains a nullable `notices` column with that meaning (no schema version bump).
+
 ## [0.5.0] - 2026-11-03
 
 ### Added

@@ -26,6 +26,8 @@ export interface AgentPolicy {
   queueSpawns: boolean;
   /** Messages one session may send per minute. */
   messagesPerMinute: number;
+  /** Tell a run (and its session) to wrap up once it lasts this long, and again at twice that; off when absent. */
+  runtimeNoticeMs?: number;
 }
 
 export interface SessionRecord {
@@ -109,6 +111,8 @@ export interface AgentSlot {
   unqueued?: "revived" | "eval";
   /** omp's id for the agent's own session (`PI_SESSION_ID` in its bash calls), once its run started. */
   ompSessionId?: string;
+  /** Runtime notices sent for this run (see `overtime.ts`): 1 at the limit, 2 at twice the limit; absent for none. */
+  overtimeNotices?: 1 | 2;
 }
 
 /** A session's place in line for a pool, after a refused spawn. */
@@ -141,6 +145,7 @@ export interface BoardEvent {
     | "spawn_refused"
     | "run_started"
     | "run_ended"
+    | "run_overtime"
     | "start_expired"
     | "hold_granted"
     | "hold_used"

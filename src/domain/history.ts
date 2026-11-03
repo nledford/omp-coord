@@ -79,6 +79,8 @@ export interface DayStats {
   maxHoldWaitMs: number;
   /** Most agents running at once in each pool. */
   peakAgents: Record<string, number>;
+  /** Runtime notices sent to agents (`run_overtime` events); absent when none. */
+  overtimeNotices?: number;
   queues: Record<string, QueueDay>;
 }
 
@@ -120,6 +122,7 @@ export function stats(events: BoardEvent[], since: number): { days: DayStats[] }
       s.holdsUsed++;
       s.maxHoldWaitMs = Math.max(s.maxHoldWaitMs, n("waitedMs"));
     }
+    if (e.type === "run_overtime") s.overtimeNotices = (s.overtimeNotices ?? 0) + 1;
     if (e.type === "run_started" && typeof e.data.pool === "string") {
       s.peakAgents[e.data.pool] = Math.max(s.peakAgents[e.data.pool] ?? 0, n("used"));
     }

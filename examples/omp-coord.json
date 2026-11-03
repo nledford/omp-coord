@@ -7,7 +7,8 @@
     },
     "exempt": ["reviewer", "security-reviewer"],
     "nested": { "allow": ["reviewer"], "maxRunningPerParent": 1 },
-    "holdMinutes": 5
+    "holdMinutes": 5,
+    "runtimeNoticeMinutes": 120
   },
   "queues": {
     "build": {

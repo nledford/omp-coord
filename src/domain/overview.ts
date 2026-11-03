@@ -39,6 +39,8 @@ export interface AgentView {
   state: "starting" | "running";
   /** When it took its slot. */
   since: number;
+  /** Runtime notices sent for the run (`agents.runtimeNoticeMinutes`): 1 at the limit, 2 at twice it; null for none. */
+  overtimeNotices: 1 | 2 | null;
 }
 
 export interface JobView {
@@ -118,6 +120,7 @@ export function agentList(board: Board): AgentView[] {
       pool: s.pool,
       state: s.state,
       since: s.since,
+      overtimeNotices: s.overtimeNotices ?? null,
     }))
     .sort(
       (a, b) =>

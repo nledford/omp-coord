@@ -5,7 +5,7 @@
 | Command | Does |
 |---|---|
 | `/coord` | Sessions, slots, the line, claims, queues, the latest decisions; marks a paused scope and sessions reading a different config file. |
-| `/coord agents` | The agents holding slots, one line each: session, id, type, parent (`Main` or an agent id), pool or `outside the caps`, state and age. Use it to see who runs, and what type each is, before messaging them. |
+| `/coord agents` | The agents holding slots, one line each: session, id, type, parent (`Main` or an agent id), pool or `outside the caps`, state and age, with "(past runtime notice N)" after an agent that got a [runtime notice](agent-slots.md#runtime-notices). Use it to see who runs, and what type each is, before messaging them. |
 | `/coord send <letter\|B/agent\|all> <text>` | Message other sessions or one of their subagents. |
 | `/coord pause [reason]`, `/coord resume` | Stop and restart new agents and queued jobs in every session. |
 | `/coord claim <branch\|worktree\|pr> <target> [note]`, `/coord release <kind> <target>` | Claim or release. |
@@ -61,7 +61,7 @@ Every time is milliseconds since the epoch (`Date.now()`); a session is its lett
 | `sessions[]` | `letter`, `id`, `folder`, `pid`, `since`, `agents` (`{ pools: { <pool>: slots held }, outsideCaps }`), `ports` (`{ from, to }` or `null`), `differentConfig` (read another config file than this scope's). By letter. |
 | `pools[]` | `name`, `used`, `cap` (now: lowered under load, `0` while paused), `configuredCap`. |
 | `line[]` | Sessions waiting for a slot: `pool`, `session`, `position` (from 1), `since`, `heldUntil` (`null` unless a freed slot is held for it). |
-| `agents[]` | One per agent holding a slot, by session letter then `since`: `id` (`null` for a spawn with no key and no first run yet), `type`, `parent` (`Main` or an agent id), `session`, `pool` (`null`: outside the caps), `state` (`starting` or `running`), `since`. |
+| `agents[]` | One per agent holding a slot, by session letter then `since`: `id` (`null` for a spawn with no key and no first run yet), `type`, `parent` (`Main` or an agent id), `session`, `pool` (`null`: outside the caps), `state` (`starting` or `running`), `since`, `overtimeNotices` (`null`, or `1` or `2`: the highest [runtime notice](agent-slots.md#runtime-notices) level reached for the run, not a count: a run first seen past twice the limit gets only notice 2). |
 | `claims[]` | `kind` (`branch`, `worktree`, `pr`), `target`, `session`, `agent`, `note`, `since`. |
 | `queues[]` | `name`, `order`, `slots` (now), `configuredSlots`, `running[]` and `waiting[]` (in the order they will start), each job: `id`, `session`, `owner` (the owning session's id, or `null` outside omp), `lane`, `priority`, `key` (or `null`), `command`, `agent` (omp's id of the agent whose command queued it, `"Main"` for the main agent; `null` for a job started outside an agent's bash call, on omp older than 18.12.4 (which sets no `PI_SESSION_ID`), and while any session of the scope runs an omp-coord older than this one, whose saves drop the ids the agent is found by), `state`, `queuedAt`, `startedAt` (`null` while waiting), `position` (from 1 while waiting, `null` while running). |
 | `notes[]` | The latest three decisions, oldest first: `id`, `at`, `session` (the letter when it was written, kept after that session ends; `null` outside omp), `author`, `text`. |

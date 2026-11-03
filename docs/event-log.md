@@ -11,7 +11,7 @@ These tables are rebuilt as sessions come and go; their layout is not part of th
 | Table | Rows |
 |---|---|
 | `sessions` | Live sessions: `id`, `label` (A, B…), `pid`, `cwd`, `socket`, `started_at`, `config_hash` (of the `.omp-coord.json` it read), `ports_from`/`ports_to`. |
-| `slots` | Agent slots held: `session_id`, `agent_id`, `parent_id`, `agent_type`, `pool` (null outside the caps), `state` (`starting` or `running`), `since`. |
+| `slots` | Agent slots held: `session_id`, `agent_id`, `parent_id`, `agent_type`, `pool` (null outside the caps), `state` (`starting` or `running`), `since`, `notices` (the highest runtime-notice level reached for the run: null, 1 or 2 — a run first seen past twice the limit gets only notice 2). |
 | `tickets` | The line: `session_id`, `pool`, `since`, `hold_until` (set while a slot is held for it), `notified`. |
 | `messages` | Messages not yet delivered. |
 | `jobs` | Queued and running build/test jobs: `id`, `queue`, `owner` (session id, or null outside omp), `lane`, `priority`, `key`, `command`, `agent` (null when not recorded), `pid`, `state` (`waiting`, `running`, `superseded`), `since`, `started_at`. |
@@ -24,7 +24,7 @@ These tables are rebuilt as sessions come and go; their layout is not part of th
 
 `events` is an append-only log: `at` (ms since epoch), `type`, `session_id` (null for jobs from outside omp), `label`, and `data` (JSON). Types:
 
-- Sessions and agents: `session_joined`, `session_left`, `spawn_approved`, `spawn_refused` (with `position`, `used`, `cap`, or `nested` and `reason`), `run_started` (with `revived`), `run_ended` (with `ranMs`), `start_expired`, `hold_granted`, `hold_used` and `hold_expired` (with `waitedMs` since the first refusal), `message_sent` (recipients and length, never the text).
+- Sessions and agents: `session_joined`, `session_left`, `spawn_approved`, `spawn_refused` (with `position`, `used`, `cap`, or `nested` and `reason`), `run_started` (with `revived`), `run_ended` (with `ranMs`), `run_overtime` (a run passed `agents.runtimeNoticeMinutes`: `agentId`, `agentType`, `pool`, `minutes`, `notice` 1 at the limit or 2 at twice it), `start_expired`, `hold_granted`, `hold_used` and `hold_expired` (with `waitedMs` since the first refusal), `message_sent` (recipients and length, never the text).
 - Jobs: `job_queued` (with `queue`, `lane`, `priority`, `key`, and `agent` and `meta` when recorded), `job_refused` (with `reason`), `job_started` (with `waitedMs`), `job_ended` (with `exitCode`, `ranMs`, `key` and `meta` when the job had them, and `timedOut` when the time limit stopped it), `job_withdrawn` (left the line before starting), `job_superseded`, `job_lost` (its runner died), `job_reprioritized`.
 - Control: `paused` (with `reason`), `resumed` (with `pausedMs`), `claimed`, `released`, `claim_refused` (with `holder`), `write_refused` (a file-tool write or a state-changing `git` command refused in a protected checkout: `agentId`, `tool` (`bash` for git), `paths` as the agent wrote them, empty for git), `note_added` (note number and length).
 
