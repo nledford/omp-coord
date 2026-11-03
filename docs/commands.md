@@ -16,12 +16,14 @@
 
 | Tool | Does |
 |---|---|
-| `coord_status` | The same overview as `/coord`. |
-| `coord_send` | Message another session or one of its subagents (main session only). |
+| `coord_status` | The same overview as `/coord`. `notes` (a whole number, at most 50 are available) sets how many latest decisions it lists, and `compact` (true or false) drops folders, start times and the spawn-queue line; the main session gets 3 decisions and the full lines, a subagent none and the compact lines. |
+| `coord_resources` | The calling agent's own ports and scratch folder. |
+| `coord_send` | Message another session or one of its subagents. |
 | `coord_claim`, `coord_release` | Claim or release a branch, worktree or PR. |
 | `coord_note` | Add to the decision log. |
-| `coord_resources` | The calling agent's own ports and scratch folder. |
 | `coord_job_priority` | Reorder this session's waiting jobs. |
+
+`coord_status` and `coord_resources` are available to every agent. The others are registered in the main session only: a subagent does not see them, which keeps their text out of every subagent's requests, and reports to its parent instead.
 
 ## `omp-coord`
 

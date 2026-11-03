@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatAgents, formatQueues } from "../src/adapters/text/report.ts";
+import { formatAgents, formatQueues, formatStatus } from "../src/adapters/text/report.ts";
 import { parseConfig } from "../src/config.ts";
 import { agentEnded, agentStarted, requestSpawn } from "../src/domain/agents.ts";
 import { claim } from "../src/domain/claims.ts";
@@ -468,5 +468,46 @@ describe("queue lines", () => {
     expect(lines.find(l => l.includes("j1"))).toMatch(/session A\/WaveUIPanels\s.*\srebase-2204 ci$/);
     expect(lines.find(l => l.includes("j1"))).not.toContain("scripts/ci.sh");
     expect(lines.find(l => l.includes("j2"))).toMatch(/session A\s.*scripts\/ci\.sh j2$/);
+  });
+});
+
+describe("status text", () => {
+  /** Sessions a and b, a claim, and four decisions. */
+  function busy() {
+    const board = emptyBoard();
+    join(board, "a");
+    join(board, "b");
+    claim(board, { sessionId: "a", agentId: "Fixer", kind: "branch", target: "fix-x", note: "wip", now: 5 * MIN });
+    for (const n of [1, 2, 3, 4]) addNote(board, { sessionId: null, author: "u", text: `decision ${n}`, now: n });
+    return board;
+  }
+
+  test("by default it lists the 3 latest decisions, each session's folder and start, and each claim's start", () => {
+    const text = formatStatus(busy(), config, "a", 9 * MIN);
+    expect(text).toContain("decision 4");
+    expect(text).toContain("decision 2");
+    expect(text).not.toContain("decision 1");
+    expect(text).toMatch(/\n {2}A {2}\/w\/a \(this session\), since .*; agents: none\n/);
+    expect(text).toMatch(/branch fix-x: session A \(Fixer\) since .*: wip/);
+    expect(formatStatus(busy(), config, "a", 9 * MIN, { notes: 3, compact: false })).toBe(text);
+  });
+
+  test("notes sets how many decisions are listed, and 0 lists none", () => {
+    const board = busy();
+    expect(formatStatus(board, config, "a", 9 * MIN, { notes: 1 })).not.toContain("decision 3");
+    expect(formatStatus(board, config, "a", 9 * MIN, { notes: 1 })).toContain("decision 4");
+    const none = formatStatus(board, config, "a", 9 * MIN, { notes: 0 });
+    expect(none).not.toContain("decision");
+    expect(none).not.toContain("Latest decisions");
+  });
+
+  test("compact drops folders and times from sessions and claims, and keeps the rest", () => {
+    const text = formatStatus(busy(), config, "a", 9 * MIN, { compact: true });
+    expect(text).toContain("\n  A (this session): no agents\n  B: no agents\n");
+    expect(text).toContain("\n  branch fix-x: session A (Fixer): wip\n");
+    expect(text).not.toContain("/w/a");
+    expect(text).not.toContain("since");
+    expect(text).toContain("Agent slots: work 0/2, short 0/1");
+    expect(text).toContain("decision 4");
   });
 });

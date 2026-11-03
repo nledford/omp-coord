@@ -46,8 +46,21 @@ export function formatAgents(board: Board, now: number): string {
   ].join("\n");
 }
 
+export interface StatusOptions {
+  /** How many of the latest decisions to list; default `LATEST_NOTES`, 0 lists none. */
+  notes?: number;
+  /** Fewer details per session and claim: no folders, start times or claim times. */
+  compact?: boolean;
+}
+
 /** Everything on the board, from the view of session `me` ("" outside omp). */
-export function formatStatus(board: Board, config: Config, me: string, now: number): string {
+export function formatStatus(
+  board: Board,
+  config: Config,
+  me: string,
+  now: number,
+  { notes = LATEST_NOTES, compact = false }: StatusOptions = {},
+): string {
   const policy = config.agents;
   const lines: string[] = [];
   lines.push(
@@ -75,8 +88,11 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
       s.configHash === config.hash ? "" : "DIFFERENT CONFIG FILE",
     ].filter(Boolean);
     lines.push(
-      `  ${s.label}  ${s.cwd}${s.id === me ? " (this session)" : ""}, since ${clock(s.startedAt)}; agents: ${perPool.join(", ") || "none"}` +
-        (extras.length ? `; ${extras.join("; ")}` : ""),
+      compact
+        ? `  ${s.label}${s.id === me ? " (this session)" : ""}: ${perPool.join(", ") || "no agents"}` +
+            (extras.length ? `; ${extras.join("; ")}` : "")
+        : `  ${s.label}  ${s.cwd}${s.id === me ? " (this session)" : ""}, since ${clock(s.startedAt)}; agents: ${perPool.join(", ") || "none"}` +
+            (extras.length ? `; ${extras.join("; ")}` : ""),
     );
   }
 
@@ -104,7 +120,9 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
     lines.push("Claims:");
     for (const c of board.claims) {
       lines.push(
-        `  ${c.kind} ${c.target}: session ${labelOf(board, c.sessionId) ?? "?"} (${c.agentId}) since ${clock(c.since)}${c.note ? `: ${c.note}` : ""}`,
+        compact
+          ? `  ${c.kind} ${c.target}: session ${labelOf(board, c.sessionId) ?? "?"} (${c.agentId})${c.note ? `: ${c.note}` : ""}`
+          : `  ${c.kind} ${c.target}: session ${labelOf(board, c.sessionId) ?? "?"} (${c.agentId}) since ${clock(c.since)}${c.note ? `: ${c.note}` : ""}`,
       );
     }
   }
@@ -112,7 +130,7 @@ export function formatStatus(board: Board, config: Config, me: string, now: numb
   const queueLines = formatQueues(board, config.queues, now);
   if (queueLines.length) lines.push("Build and test queues:", ...queueLines);
 
-  const recent = board.notes.slice(-LATEST_NOTES);
+  const recent = notes > 0 ? board.notes.slice(-notes) : [];
   if (recent.length)
     lines.push(
       "Latest decisions (all: notes):",

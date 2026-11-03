@@ -10,6 +10,17 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 - `agents.runtimeNoticeMinutes` (a whole number of minutes; off when absent): an agent whose run lasts that long, in any pool and nested or exempt ones too, gets one message to stop at the next clean point and write its handoff, and its session gets one notice naming it; both again at twice the limit, then no more. Nothing is stopped. New event `run_overtime` (`agentId`, `agentType`, `pool`, `minutes`, `notice` 1 or 2); `omp-coord stats` and `/coord stats` add `, N overtime notices` to a day that had some; `/coord agents` marks an agent past a notice, and each `agents[]` row of `status --json` gains `overtimeNotices` (`null`, `1` or `2`), the highest notice level reached. The slots table gains a nullable `notices` column with that meaning (no schema version bump).
 
+## [0.5.0] - 2026-11-03
+
+### Added
+
+- `coord_status` takes `notes` (how many of the latest decisions to list, a whole number, 0 or more) and `compact` (true: no folders, start times or claim times, and no spawn-queue line). Without them the main session gets 3 decisions and the full lines, as before; a subagent gets no decisions and the compact lines.
+
+### Changed
+
+- **Breaking:** a subagent no longer has `coord_send`, `coord_claim`, `coord_release`, `coord_note` and `coord_job_priority`: they are registered in the main session only (`coord_status` and `coord_resources` stay for every agent), which removes their text from every request a subagent makes. A subagent that needs to message another session, claim something, record a decision or reorder a job reports to its parent, which does it. A message delivered to a subagent, and the refusal of a subagent's command on another session's claim, no longer tell it to use `coord_send`.
+- The tool descriptions are one sentence each, and some parameter descriptions are shorter. The tools' text sent with each request falls by about a quarter in the main session and about four fifths in a subagent.
+
 ## [0.4.2] - 2026-11-02
 
 ### Added
@@ -124,7 +135,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nledford/omp-coord/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/nledford/omp-coord/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/nledford/omp-coord/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nledford/omp-coord/compare/v0.3.2...v0.4.0

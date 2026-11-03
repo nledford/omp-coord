@@ -19,6 +19,7 @@ import { type Config, ConfigError, findConfigFile, loadConfig } from "../../conf
 import { spawnAllowance } from "../../domain/agents.ts";
 import { decideCommand, MAX_CHECKED_COMMAND } from "../../domain/commands.ts";
 import type { Claim } from "../../domain/model.ts";
+import { LATEST_NOTES } from "../../domain/overview.ts";
 import {
   canonicalWith,
   decideWrite,
@@ -39,6 +40,7 @@ import {
   formatNotes,
   formatStats,
   formatStatus,
+  type StatusOptions,
 } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
 import type { ExtensionAPI, ExtensionContext, Timer, ToolCallEvent, ToolResult } from "./api.ts";
@@ -102,6 +104,9 @@ const shared: Shared = (() => {
   return store[key];
 })();
 
+/** Main-session bindings whose main-only tools are registered, so a repeated `session_start` registers once. */
+const mainToolsRegistered = new WeakSet<ExtensionAPI>();
+
 export default function ompCoord(pi: ExtensionAPI): void {
   pi.setLabel("omp-coord");
 
@@ -110,6 +115,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
       shared.bindings.set(ctx.agent.id, pi);
       return;
     }
+    registerMainTools(pi);
     const rt = shared.runtime;
     if (rt) {
       rt.pi = pi;
@@ -223,9 +229,11 @@ export default function ompCoord(pi: ExtensionAPI): void {
       });
       if (held) {
         const holder = rt.coordinator.board().sessions.find(s => s.id === held.sessionId)?.label ?? "?";
+        // a subagent has no coord_send: it asks through its parent
+        const ask = ctx.agent.kind === "main" ? "ask that session with coord_send" : "tell your parent";
         return {
           block: true,
-          reason: `omp-coord: ${held.kind} ${held.target} is claimed by session ${holder} (${held.agentId})${held.note ? `: ${held.note}` : ""}. Leave it alone; ask that session with coord_send if you need it.`,
+          reason: `omp-coord: ${held.kind} ${held.target} is claimed by session ${holder} (${held.agentId})${held.note ? `: ${held.note}` : ""}. Leave it alone; ${ask} if you need it.`,
         };
       }
     } catch (error) {
@@ -247,103 +255,22 @@ export default function ompCoord(pi: ExtensionAPI): void {
     return undefined;
   });
 
-  const inactive = () => text(shared.inactive, true);
-
-  pi.registerTool<Record<string, never>>({
+  pi.registerTool<{ notes?: number; compact?: boolean }>({
     name: "coord_status",
     label: "Coordination status",
     description:
-      "Shows the omp sessions coordinating with this one (by letter), the agent slots each holds against the shared caps, " +
-      "sessions in line for a slot, claims, the build/test queues and the latest decisions. Check it before starting agents or heavy builds.",
-    parameters: pi.zod.object({}),
-    async execute() {
-      const rt = shared.runtime;
-      return rt ? text(statusText(rt)) : inactive();
-    },
-  });
-
-  pi.registerTool<{ to: string; text: string }>({
-    name: "coord_send",
-    label: "Message another omp session",
-    description:
-      "Sends a message to another omp session working in the same project: `to` is its letter (see coord_status), " +
-      "`<letter>/<agent id>` for one of its subagents, or `all`. Use it for facts the other session needs: handoffs, a change " +
-      "to main it must react to, a question about something it claimed. Keep messages short and factual; never ask the " +
-      "other session to reply just to acknowledge.",
+      "Shows sessions, agent slots, the line, claims, build/test queues and recent decisions; check it before starting agents or heavy builds.",
     parameters: pi.zod.object({
-      to: pi.zod.string().describe("Session letter (A, B, …), `B/<agent id>`, or `all`"),
-      text: pi.zod.string().describe("The message"),
+      notes: pi.zod.number().optional().describe("Decisions to list (default 3; 0 in subagents)"),
+      compact: pi.zod.boolean().optional().describe("Shorter lines (default on in subagents)"),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const rt = shared.runtime;
       if (!rt) return inactive();
-      if (ctx.agent.kind !== "main")
-        return text("Only the main session messages other sessions; report to your parent instead.", true);
-      return sendFrom(rt, params.to, params.text);
-    },
-  });
-
-  pi.registerTool<{ kind: string; target: string; note?: string }>({
-    name: "coord_claim",
-    label: "Claim a branch, worktree or PR",
-    description:
-      "Claims a branch, a worktree (absolute path) or a PR (number) for this session before working on it. Other sessions' " +
-      "agents are then refused git and gh commands that would change it, until this session releases it or ends. Refused " +
-      "when another session holds it.",
-    parameters: pi.zod.object({
-      kind: pi.zod.string().describe("branch, worktree or pr"),
-      target: pi.zod.string().describe("Branch name, worktree path, or PR number"),
-      note: pi.zod.string().optional().describe("What you do with it, off which base, which files"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const kind = claimKind(params.kind);
-      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
-      const r = rt.coordinator.claim({
-        sessionId: rt.sessionId,
-        agentId: ctx.agent.id,
-        kind,
-        target: params.target,
-        note: params.note ?? "",
-        cwd: ctx.cwd,
-      });
-      return r.ok ? text(`Claimed ${kind} ${params.target}.`) : text(`Not claimed: ${r.reason}.`, true);
-    },
-  });
-
-  pi.registerTool<{ kind: string; target: string }>({
-    name: "coord_release",
-    label: "Release a claim",
-    description: "Releases a branch, worktree or PR this session claimed, once the work on it is done or handed over.",
-    parameters: pi.zod.object({
-      kind: pi.zod.string().describe("branch, worktree or pr"),
-      target: pi.zod.string().describe("Branch name, worktree path, or PR number"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const kind = claimKind(params.kind);
-      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
-      const r = rt.coordinator.release({ sessionId: rt.sessionId, kind, target: params.target, cwd: ctx.cwd });
-      return r.ok ? text(`Released ${kind} ${params.target}.`) : text(`Not released: ${r.reason}.`, true);
-    },
-  });
-
-  pi.registerTool<{ text: string }>({
-    name: "coord_note",
-    label: "Record a decision",
-    description:
-      "Adds a short entry to the decision log every session sees: a decision the user made, with who and when, or a fact " +
-      "all sessions must keep to. Not for progress reports or messages to one session (use coord_send).",
-    parameters: pi.zod.object({
-      text: pi.zod.string().describe("The decision, e.g. 'User, 14:05: ship #2913 before #2914'"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const r = rt.coordinator.note(rt.sessionId, ctx.agent.id, params.text);
-      return r.ok ? text(`Recorded as decision #${r.note.id}.`) : text(`Not recorded: ${r.reason}.`, true);
+      const sub = ctx.agent.kind !== "main";
+      const notes = params.notes ?? (sub ? 0 : LATEST_NOTES);
+      if (!Number.isSafeInteger(notes) || notes < 0) return text("notes must be a whole number, 0 or more", true);
+      return text(statusText(rt, { notes, compact: params.compact ?? sub }));
     },
   });
 
@@ -351,8 +278,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
     name: "coord_resources",
     label: "Ports and scratch folder",
     description:
-      "Gives the calling agent its own block of ports and its own scratch folder, so it never collides with other agents " +
-      "or sessions (e.g. for a server or a control port). The same agent always gets the same ones.",
+      "Your own block of ports and scratch folder, never shared with other agents or sessions; stable per agent.",
     parameters: pi.zod.object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const rt = shared.runtime;
@@ -367,29 +293,6 @@ export default function ompCoord(pi: ExtensionAPI): void {
       return lines.length
         ? text(lines.join("\n"))
         : text("This scope hands out no ports or scratch folders (resources in .omp-coord.json).", true);
-    },
-  });
-
-  pi.registerTool<{ job: string; priority: string }>({
-    name: "coord_job_priority",
-    label: "Reorder this session's queued jobs",
-    description:
-      "Changes the priority of one of this session's jobs waiting in a build/test queue (job ids are in coord_status). " +
-      "Higher goes first among this session's own jobs; it never moves them ahead of other sessions' jobs in fair-share queues. " +
-      "Use it when one waiting job matters more than another, e.g. a fix for an approved PR over a trial build.",
-    parameters: pi.zod.object({
-      job: pi.zod.string().describe("Job id from coord_status"),
-      priority: pi.zod.string().describe("Whole number; 0 is normal, higher goes first"),
-    }),
-    async execute(_id, params) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const priority = Number(params.priority);
-      if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
-      const result = rt.coordinator.setJobPriority(rt.sessionId, params.job, priority);
-      return result.ok
-        ? text(`Job ${params.job} now has priority ${priority}.`)
-        : text(`Not changed: ${result.reason}.`, true);
     },
   });
 
@@ -470,6 +373,114 @@ export default function ompCoord(pi: ExtensionAPI): void {
       } catch (error) {
         say(text(`omp-coord: ${describe(error)}`, true));
       }
+    },
+  });
+}
+
+/**
+ * The tools only the main session uses. They are registered from the main session's `session_start`, where
+ * `ctx.agent.kind` is known, not in the factory: omp rebinds the factory for every subagent, and a subagent's tool
+ * list is text in every request it makes.
+ */
+function registerMainTools(pi: ExtensionAPI): void {
+  if (mainToolsRegistered.has(pi)) return;
+  mainToolsRegistered.add(pi);
+
+  pi.registerTool<{ to: string; text: string }>({
+    name: "coord_send",
+    label: "Message another omp session",
+    description:
+      "Messages another omp session in this project: `to` is its letter, `<letter>/<agent id>` or `all`; keep it short and factual, never just to acknowledge.",
+    parameters: pi.zod.object({
+      to: pi.zod.string().describe("Letter, `B/<agent id>`, or `all`"),
+      text: pi.zod.string().describe("The message"),
+    }),
+    async execute(_id, params) {
+      const rt = shared.runtime;
+      if (!rt) return inactive();
+      return sendFrom(rt, params.to, params.text);
+    },
+  });
+
+  pi.registerTool<{ kind: string; target: string; note?: string }>({
+    name: "coord_claim",
+    label: "Claim a branch, worktree or PR",
+    description:
+      "Claims a branch, worktree (absolute path) or PR (number) so other sessions' agents can't change it with git or gh until released; refused when held.",
+    parameters: pi.zod.object({
+      kind: pi.zod.string().describe("branch, worktree or pr"),
+      target: pi.zod.string().describe("Branch, worktree path, or PR number"),
+      note: pi.zod.string().optional().describe("What you do with it, which files"),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const rt = shared.runtime;
+      if (!rt) return inactive();
+      const kind = claimKind(params.kind);
+      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
+      const r = rt.coordinator.claim({
+        sessionId: rt.sessionId,
+        agentId: ctx.agent.id,
+        kind,
+        target: params.target,
+        note: params.note ?? "",
+        cwd: ctx.cwd,
+      });
+      return r.ok ? text(`Claimed ${kind} ${params.target}.`) : text(`Not claimed: ${r.reason}.`, true);
+    },
+  });
+
+  pi.registerTool<{ kind: string; target: string }>({
+    name: "coord_release",
+    label: "Release a claim",
+    description: "Releases a branch, worktree or PR this session claimed.",
+    parameters: pi.zod.object({
+      kind: pi.zod.string().describe("branch, worktree or pr"),
+      target: pi.zod.string().describe("Branch, worktree path, or PR number"),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const rt = shared.runtime;
+      if (!rt) return inactive();
+      const kind = claimKind(params.kind);
+      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
+      const r = rt.coordinator.release({ sessionId: rt.sessionId, kind, target: params.target, cwd: ctx.cwd });
+      return r.ok ? text(`Released ${kind} ${params.target}.`) : text(`Not released: ${r.reason}.`, true);
+    },
+  });
+
+  pi.registerTool<{ text: string }>({
+    name: "coord_note",
+    label: "Record a decision",
+    description:
+      "Adds a short entry to the decision log every session sees: a user decision with who and when, or a fact all must keep to; not progress.",
+    parameters: pi.zod.object({
+      text: pi.zod.string().describe("E.g. 'User, 14:05: ship #2913 first'"),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const rt = shared.runtime;
+      if (!rt) return inactive();
+      const r = rt.coordinator.note(rt.sessionId, ctx.agent.id, params.text);
+      return r.ok ? text(`Recorded as decision #${r.note.id}.`) : text(`Not recorded: ${r.reason}.`, true);
+    },
+  });
+
+  pi.registerTool<{ job: string; priority: string }>({
+    name: "coord_job_priority",
+    label: "Reorder this session's queued jobs",
+    description:
+      "Sets the priority of one of this session's waiting queue jobs; higher goes first, never ahead of other sessions' jobs in fair-share queues.",
+    parameters: pi.zod.object({
+      job: pi.zod.string().describe("Job id from coord_status"),
+      priority: pi.zod.string().describe("Whole number; 0 normal, higher first"),
+    }),
+    async execute(_id, params) {
+      const rt = shared.runtime;
+      if (!rt) return inactive();
+      const priority = Number(params.priority);
+      if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
+      const result = rt.coordinator.setJobPriority(rt.sessionId, params.job, priority);
+      return result.ok
+        ? text(`Job ${params.job} now has priority ${priority}.`)
+        : text(`Not changed: ${result.reason}.`, true);
     },
   });
 }
@@ -656,18 +667,21 @@ async function tick(rt: Runtime): Promise<void> {
   rt.queue?.apply(spawnAllowance(board, rt.config.agents, rt.sessionId, now));
 
   for (const m of inbox) {
-    const body =
+    const framed = (reply: string) =>
       `[omp-coord] Message from omp session ${m.from} (sent ${clock(m.sentAt)}):\n\n${m.text}\n\n` +
-      "This comes from another omp session in this project, not from the user. Act on it within your own task and rules; " +
-      `reply with coord_send to ${m.from} only when it needs an answer.`;
+      `This comes from another omp session in this project, not from the user. Act on it within your own task and rules; ${reply}`;
     const binding = m.toAgent ? shared.bindings.get(m.toAgent) : undefined;
-    if (binding) deliver(binding, body);
-    else if (m.toAgent) {
+    // a subagent has no coord_send: it answers through its parent
+    if (binding) deliver(binding, framed("you cannot message other sessions: tell your parent if it needs an answer."));
+    else {
+      const body = framed(`reply with coord_send to ${m.from} only when it needs an answer.`);
       deliver(
         rt.pi,
-        `[omp-coord] A message for your subagent ${m.toAgent}, which is not running now. Pass it on with write agent://${m.toAgent} if it still matters:\n\n${body}`,
+        m.toAgent
+          ? `[omp-coord] A message for your subagent ${m.toAgent}, which is not running now. Pass it on with write agent://${m.toAgent} if it still matters:\n\n${body}`
+          : body,
       );
-    } else deliver(rt.pi, body);
+    }
   }
   for (const h of holds) {
     deliver(
@@ -719,15 +733,21 @@ function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
   return result.ok ? text(`Sent to ${result.delivered.join(", ")}.`) : text(`Not sent: ${result.reason}.`, true);
 }
 
-function statusText(rt: Runtime): string {
+function statusText(rt: Runtime, options: StatusOptions = {}): string {
   const board = rt.coordinator.board();
+  const status = formatStatus(board, rt.config, rt.sessionId, Date.now(), options);
+  if (options.compact) return status;
   // whether this session's spawns wait in omp's queue right now, and why not
   const queueLine = !rt.queue
     ? rt.queueNote
     : spawnAllowance(board, rt.config.agents, rt.sessionId, Date.now()) !== undefined
       ? "Spawns past the cap wait in omp's queue and start as slots free (this is the only session)."
       : `Spawns over the cap are refused and put this session in line (${board.pause ? "the scope is paused" : board.sessions.length > 1 ? "other sessions are in the scope" : board.slots.some(x => x.sessionId === rt.sessionId && x.unqueued === "eval") ? "a workpool's workers are running" : "no slot is free for a new spawn"}).`;
-  return `${formatStatus(board, rt.config, rt.sessionId, Date.now())}\n${queueLine}`;
+  return `${status}\n${queueLine}`;
+}
+
+function inactive(): ToolResult {
+  return text(shared.inactive, true);
 }
 
 function deliver(binding: ExtensionAPI, content: string): void {
