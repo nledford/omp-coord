@@ -21,8 +21,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # On Linux, the platform of the one check `main` requires: macOS arm64 runners can queue for an hour or more when
+  # GitHub is short of them (3 Nov 2026). CI still runs on macOS for every pull request.
   check:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
