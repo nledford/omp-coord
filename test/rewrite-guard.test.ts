@@ -35,6 +35,8 @@ const REFUSED = [
   "python3 -c \"pathlib.Path('f').write_bytes(b'x')\"",
   "uv run python - <<'E'\nPath('f').write_text('x')\nE",
   "/usr/bin/python3 -u - <<'E'\nopen('f','a')\nE",
+  "cat <<'EOF' > notes.md\nx\nEOF\nsed -i 's/a/b/' f",
+  "cat <<'EOF' > notes.md\nx\nEOF\npython3 - <<'E'\nopen('f','w')\nE",
 ];
 
 const ALLOWED = [
@@ -56,6 +58,8 @@ const ALLOWED = [
   "python3 -c 'print(1)' && rg 'write_text\\('",
   "sed -E 's/i/j/g' f > out",
   "perl -Ilib script.pl",
+  "cat <<'EOF' > notes.md\nrefuse sed -i and perl -i\nEOF",
+  "git commit -F - <<'EOF'\nStop using sed -i\nEOF",
 ];
 
 describe("in-place rewrites by subagents", () => {

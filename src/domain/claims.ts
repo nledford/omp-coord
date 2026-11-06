@@ -6,15 +6,13 @@
  * Uses `node:path`'s POSIX path arithmetic (pure string functions); nothing here reads the file system.
  */
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { GIT_CHANGE_TEXT } from "./git.ts";
 import { type Board, type Claim, emit, labelOf } from "./model.ts";
 
 export type ClaimResult = { ok: true } | { ok: false; reason: string };
 
 const KINDS: Claim["kind"][] = ["branch", "worktree", "pr"];
 
-/** git subcommands that change a worktree, a branch or a remote. */
-const GIT_CHANGES =
-  /\bgit\b(?:\s+-C\s+\S+)?(?:\s+-[^\s]+)*\s+(commit|push|pull|rebase|reset|checkout|switch|merge|cherry-pick|revert|am|apply|stash|restore|clean|rm|mv|tag|branch\s+-[dDmMf])\b/;
 /** A `gh pr` subcommand that changes a PR, with the rest of its shell command. */
 const GH_PR_CHANGES = /\bgh\s+pr\s+(?:edit|comment|merge|close|reopen|ready|review|lock|unlock)\b([^;&|]*)/g;
 /** A `gh api` call with the rest of its shell command. */
@@ -101,7 +99,7 @@ export function claimConflict(board: Board, q: CommandQuery): Claim | undefined 
   const pr = others.find(c => c.kind === "pr" && prs.has(c.target));
   if (pr) return pr;
 
-  if (!GIT_CHANGES.test(q.command)) return undefined;
+  if (!GIT_CHANGE_TEXT.test(q.command)) return undefined;
   const dirs = gitDirs(q.command, q.cwd, q.home);
   const isRoot = q.isWorktreeRoot ?? (() => false);
   const worktree = others.find(c => c.kind === "worktree" && dirs.some(d => withinWorktree(d, c.target, isRoot)));

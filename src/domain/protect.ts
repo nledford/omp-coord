@@ -13,6 +13,7 @@
  * Pure path arithmetic; what the disk says (symlinks, nested checkouts) is passed in.
  */
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isGitChange } from "./git.ts";
 import { type Board, emit } from "./model.ts";
 
 export interface WriteGuard {
@@ -156,27 +157,6 @@ export function decideWrite(
   return { kind: "allow" };
 }
 
-/** `git` subcommands that change a checkout's files, index or HEAD (`branch` is left out: most uses only read). */
-const GIT_CHANGES: Record<string, true> = {
-  checkout: true,
-  switch: true,
-  reset: true,
-  restore: true,
-  clean: true,
-  rebase: true,
-  merge: true,
-  commit: true,
-  pull: true,
-  "cherry-pick": true,
-  revert: true,
-  am: true,
-  add: true,
-  rm: true,
-  mv: true,
-  apply: true,
-  bisect: true,
-};
-
 /** How deep below a root a linked worktree is looked for: they sit one or two levels down (`.claude/worktrees/x`). */
 const MAX_NEST_DEPTH = 8;
 
@@ -264,7 +244,7 @@ export function gitChange(
           break;
         }
       }
-      return sub === undefined || !Object.hasOwn(GIT_CHANGES, sub) || dir === undefined ? undefined : judge(sub, dir);
+      return sub === undefined || !isGitChange(sub) || dir === undefined ? undefined : judge(sub, dir);
     }) ?? { kind: "allow" }
   );
 }
