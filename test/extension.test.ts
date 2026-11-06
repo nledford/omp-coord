@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentIdentity, ExtensionAPI, ExtensionContext, ToolResult } from "../src/adapters/omp/api.ts";
 import ompCoord from "../src/adapters/omp/extension.ts";
@@ -249,6 +249,33 @@ describe("the omp adapter's tools", () => {
       expect(refusal.reason).toContain("claimed by session B");
       expect(refusal.reason).not.toContain("coord_send");
       expect(refusal.reason).toContain("tell your parent");
+    });
+
+    test("reads a bash call's `cwd` as omp does: `~` is the home folder", async () => {
+      const { m } = await sessions();
+      const other = peer();
+      const name = `omp-coord-claim-cwd-${process.pid}`;
+      try {
+        expect(
+          other.coordinator.claim({
+            sessionId: "peer",
+            agentId: "Main",
+            kind: "worktree",
+            target: join(homedir(), name),
+            note: "",
+            cwd: folder,
+          }),
+        ).toEqual({ ok: true });
+        const result = await m.fire("tool_call", main, {
+          toolName: "bash",
+          input: { command: "git add -A", cwd: `~/${name}` },
+        });
+        // the same shape refusalFor reads: a block with a reason
+        const refusal = result as { block: boolean; reason: string };
+        expect(refusal.reason).toContain("claimed by session B");
+      } finally {
+        other.close();
+      }
     });
   });
 

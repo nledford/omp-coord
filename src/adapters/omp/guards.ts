@@ -5,7 +5,7 @@
  */
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Coordinator } from "../../app/coordinator.ts";
 import { decideCommand, MAX_CHECKED_COMMAND } from "../../domain/commands.ts";
 import {
@@ -76,8 +76,8 @@ export function checkToolCall(
   // the id must be on the board before the command can reach `omp-coord run`, whatever event announced a switch
   if (ctx.agent.kind === "main") syncMainSession(rt, ctx);
 
+  const cwd = callCwd(ctx, event.input?.cwd);
   try {
-    const cwd = typeof event.input?.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
     const held = rt.coordinator.checkCommand({
       sessionId: rt.sessionId,
       command,
@@ -98,7 +98,7 @@ export function checkToolCall(
   } catch (error) {
     notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
   }
-  const gitHeld = guardGit(rt, ctx, command, event.input?.cwd);
+  const gitHeld = guardGit(rt, ctx, command, cwd);
   if (gitHeld) return gitHeld;
 
   const decision = decideCommand(
@@ -133,13 +133,17 @@ function guardWrite(rt: Runtime, event: ToolCallEvent, ctx: ExtensionContext): B
   );
 }
 
+/** The folder a bash call runs in: its `cwd` as omp reads it (`~` expanded, relative to omp's folder), else omp's. */
+function callCwd(ctx: ExtensionContext, inputCwd: unknown): string {
+  return typeof inputCwd === "string" ? resolveCwd(ctx.cwd, inputCwd, homedir()) : ctx.cwd;
+}
+
 /**
  * The `protect` guard for a bash command's state-changing `git`: it must not run in a protected checkout. A command
  * over the length cap is left to `decideCommand`, which refuses it while a refuse rule exists.
  */
-function guardGit(rt: Runtime, ctx: ExtensionContext, command: string, inputCwd: unknown): Block | undefined {
+function guardGit(rt: Runtime, ctx: ExtensionContext, command: string, cwd: string): Block | undefined {
   if (!rt.config.protect || command.length > MAX_CHECKED_COMMAND || !/\bgit\b/.test(command)) return undefined;
-  const cwd = typeof inputCwd === "string" ? resolveCwd(ctx.cwd, inputCwd, homedir()) : ctx.cwd;
   return refuseProtected(rt, ctx, "bash", [], cwd, (guard, facts) =>
     gitChange(guard, ctx.agent.kind, command, cwd, facts),
   );
