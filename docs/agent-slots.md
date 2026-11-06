@@ -34,9 +34,9 @@ The refusal, as the refused session sees it (here both `work` slots are in use b
 
 ![A spawn refused with "FULL: 2/2 work slots are in use across all sessions", and the /coord board showing session A first in line for work](images/spawn-refused.png)
 
-When one of B's agents ends, the slot is held for A, which is woken with a notice and starts the refused agent:
+The refusal says that the spawn did NOT start and will not start by itself: the agent must be started again when the slot is held. When one of B's agents ends, the slot is held for A, which is woken with a notice that names the refused agent (its type, and its name when omp gave one; if several spawns were refused, the first one) and starts it again:
 
-![The omp-coord notice "A work slot is free and held for this session until 09:47 AM", followed by the restarted agent finishing](images/slot-held.png)
+![The omp-coord notice "A work slot is free and held for this session until 12:02 PM. That spawn did not start: start the task agent PriceAudit that was refused again now", followed by the restarted agent finishing](images/slot-held.png)
 
 omp gives the spawn check 30 seconds and then lets the spawn through, so the extension never waits inside it: spawns wait in omp's queue before the check while the session is alone (above), and one that reaches it over the cap is refused at once, with the next free slot held. If the shared board cannot be read, spawns are let through with an error notice: the cap is an agreement between sessions, not a security boundary.
 

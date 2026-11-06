@@ -124,6 +124,10 @@ export interface Ticket {
   holdUntil: number | undefined;
   /** Whether the session has been told about its hold. */
   notified: boolean;
+  /** The agent type of the spawn whose refusal opened this place in line (a later refusal keeps it). */
+  agentType?: string;
+  /** That spawn's name or id when omp gave one (omp's spawn key). */
+  agentName?: string;
 }
 
 export interface Message {

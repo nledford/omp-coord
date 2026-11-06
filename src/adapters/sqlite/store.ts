@@ -59,6 +59,8 @@ CREATE TABLE tickets (
   since      INTEGER NOT NULL,
   hold_until INTEGER,
   notified   INTEGER NOT NULL CHECK (notified IN (0, 1)),
+  agent_type TEXT,
+  agent_name TEXT,
   PRIMARY KEY (session_id, pool)
 ) STRICT;
 CREATE TABLE messages (
@@ -267,6 +269,8 @@ export class BoardStore implements BoardRepository {
     if (!has("slots", "omp_session")) this.#db.exec("ALTER TABLE slots ADD COLUMN omp_session TEXT");
     if (!has("slots", "notices"))
       this.#db.exec("ALTER TABLE slots ADD COLUMN notices INTEGER CHECK (notices IN (1, 2))");
+    if (!has("tickets", "agent_type")) this.#db.exec("ALTER TABLE tickets ADD COLUMN agent_type TEXT");
+    if (!has("tickets", "agent_name")) this.#db.exec("ALTER TABLE tickets ADD COLUMN agent_name TEXT");
   }
 
   #maybePruneEvents(now: number): void {
@@ -338,9 +342,18 @@ export class BoardStore implements BoardRepository {
           ...(r.notices ? { overtimeNotices: r.notices } : {}),
         })),
       waitlist: db
-        .query<{ session_id: string; pool: string; since: number; hold_until: number | null; notified: number }, []>(
-          "SELECT * FROM tickets",
-        )
+        .query<
+          {
+            session_id: string;
+            pool: string;
+            since: number;
+            hold_until: number | null;
+            notified: number;
+            agent_type: string | null;
+            agent_name: string | null;
+          },
+          []
+        >("SELECT * FROM tickets")
         .all()
         .map(r => ({
           sessionId: r.session_id,
@@ -348,6 +361,8 @@ export class BoardStore implements BoardRepository {
           since: r.since,
           holdUntil: r.hold_until ?? undefined,
           notified: r.notified === 1,
+          ...(r.agent_type === null ? {} : { agentType: r.agent_type }),
+          ...(r.agent_name === null ? {} : { agentName: r.agent_name }),
         })),
       messages: db
         .query<{ from_id: string; to_id: string; to_agent: string | null; text: string; sent_at: number }, []>(
@@ -501,9 +516,18 @@ export class BoardStore implements BoardRepository {
         s.overtimeNotices ?? null,
       );
     const ticket = db.query(
-      "INSERT INTO tickets (session_id, pool, since, hold_until, notified) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO tickets (session_id, pool, since, hold_until, notified, agent_type, agent_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
-    for (const t of board.waitlist) ticket.run(t.sessionId, t.pool, t.since, t.holdUntil ?? null, t.notified ? 1 : 0);
+    for (const t of board.waitlist)
+      ticket.run(
+        t.sessionId,
+        t.pool,
+        t.since,
+        t.holdUntil ?? null,
+        t.notified ? 1 : 0,
+        t.agentType ?? null,
+        t.agentName ?? null,
+      );
     const message = db.query("INSERT INTO messages (from_id, to_id, to_agent, text, sent_at) VALUES (?, ?, ?, ?, ?)");
     for (const m of board.messages) message.run(m.fromId, m.toId, m.toAgent ?? null, m.text, m.sentAt);
     const sent = db.query("INSERT INTO sent (session_id, at) VALUES (?, ?)");

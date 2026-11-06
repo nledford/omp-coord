@@ -138,12 +138,43 @@ describe("holding a freed slot for the oldest refused session", () => {
     expect(spawn(board, "b", "task", 1).allowed).toBe(false);
 
     agentEnded(board, policy, { sessionId: "a", agentId: "A1", now: 2 });
-    expect(takeNewHolds(board, "b")).toEqual([{ pool: "work", until: 2 + policy.holdMs }]);
+    expect(takeNewHolds(board, "b")).toEqual([{ pool: "work", until: 2 + policy.holdMs, agentType: "task" }]);
     expect(takeNewHolds(board, "b")).toEqual([]);
 
     expect(spawn(board, "a", "task", 3)).toMatchObject({ allowed: false, position: 2 });
     expect(spawn(board, "b", "task", 4).allowed).toBe(true);
     expect(spawn(board, "b", "task", 5)).toMatchObject({ allowed: false, position: 2 });
+  });
+
+  test("the hold names the agent that was refused: its type, and its name when omp gave one; the first refusal's stays", () => {
+    const board = boardWith("a", "b");
+    run(board, "a", "A1");
+    run(board, "a", "A2");
+    const ask = (agentType: string, spawnKey: string | undefined, now: number) =>
+      requestSpawn(board, policy, {
+        sessionId: "b",
+        parentAgentId: "Main",
+        parentIsSubagent: false,
+        agentType,
+        ...(spawnKey === undefined ? {} : { spawnKey }),
+        now,
+      });
+    expect(ask("task", "CatalogTests", 1).allowed).toBe(false);
+    expect(ask("task", "Other", 2).allowed).toBe(false);
+
+    agentEnded(board, policy, { sessionId: "a", agentId: "A1", now: 3 });
+    expect(takeNewHolds(board, "b")).toEqual([
+      { pool: "work", until: 3 + policy.holdMs, agentType: "task", agentName: "CatalogTests" },
+    ]);
+  });
+
+  test("a full-pool refusal says plainly that the spawn did not start and must be issued again on the hold message", () => {
+    const board = boardWith("a", "b");
+    run(board, "a", "A1");
+    run(board, "a", "A2");
+    const refused = spawn(board, "b", "task", 1);
+    expect(refused.allowed === false && refused.reason).toContain("This spawn did NOT start");
+    expect(refused.allowed === false && refused.reason).toContain("start the agent again");
   });
 
   test("refused sessions are served in the order they were first refused", () => {

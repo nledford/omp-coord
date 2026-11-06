@@ -68,6 +68,74 @@ describe("agents' bash commands", () => {
     expect(decideCommand(rules, "ls -la", runner)).toEqual({ kind: "allow" });
   });
 
+  describe("a command that merely mentions the wrapper is still judged", () => {
+    const env = { ...runner, env: { BUN_BE_BUN: "1" } };
+    const wrapped = (command: string) => {
+      const d = decideCommand(rules, command, env);
+      if (d.kind !== "queue") throw new Error(`expected a queue decision for ${command}`);
+      return d.command;
+    };
+
+    test("a refused command after the wrapper, or around its words, is refused", () => {
+      for (const command of [
+        "omp-coord run x; pkill y",
+        "omp-coord run test -- cargo test && pkill y",
+        "omp-coord run test -- cargo test || pkill y",
+        "omp-coord run test -- cargo test | pkill y",
+        "omp-coord run test -- cargo test & pkill y",
+        "omp-coord run test -- cargo test\npkill y",
+        "omp-coord run test -- cargo test $(pkill y)",
+        // shell syntax that hides a second command from a scanner reading the text a character at a time
+        "omp-coord run x \\>& pkill y",
+        "omp-coord run x ${y:- # } ; pkill z",
+        "omp-coord run x\\\n#; pkill y",
+        "omp-coord run x $'\\''&pkill\n$(<\\'x",
+        "omp-coord run x &>& pkill y",
+        // `&>` is a redirection only in bash: sh runs `x &` and then `pkill y` with a redirect
+        "omp-coord run x &> out pkill y",
+        "omp-coord run x &>> out pkill y",
+        // the shell's blanks are space, tab and newline; NBSP and other Unicode spaces are word characters
+        "\u00a0omp-coord run x -- pkill y",
+        "\u2003omp-coord run x -- pkill y",
+        "omp-coord run\u00a0-- pkill y",
+        // only a space or a tab ends a word before a comment: these are word characters to the shell
+        "omp-coord run x\f# ; pkill y",
+        "omp-coord run x\u00a0# ; pkill y",
+        `${wrapped("cargo test")}; pkill y`,
+        `${wrapped("cargo test")} && pkill y`,
+        "echo omp-coord run; pkill y",
+        "cd /w && omp-coord run test -- cargo test; pkill y",
+        "pkill -f '/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts'",
+        "echo '/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts'; pkill y",
+      ]) {
+        expect(decideCommand(rules, command, env), command).toEqual({
+          kind: "refuse",
+          reason: "stop only your own process",
+        });
+      }
+    });
+
+    test("a command substitution after the wrapper reaches the rules instead of skipping them", () => {
+      // the rule patterns here do not look inside backticks; what matters is that the early allow is gone
+      expect(decideCommand(rules, "omp-coord run test -- cargo test `pkill y`", env).kind).toBe("queue");
+    });
+
+    test("the wrapper as this extension writes it, and a bare `omp-coord run`, are allowed", () => {
+      const real = wrapped("cd /w && cargo test -p core 'a b'; echo \"$(date)\" | tee x");
+      expect(decideCommand(rules, real, env)).toEqual({ kind: "allow" });
+      expect(decideCommand(rules, "omp-coord run test -- cargo test -p core 2>&1", env)).toEqual({ kind: "allow" });
+      expect(decideCommand(rules, "omp-coord run test --owner s1 -- sh -c 'cargo test; echo done'", env)).toEqual({
+        kind: "allow",
+      });
+    });
+
+    test("a queued command is not wrapped a second time", () => {
+      for (const command of ["cargo test", "cd /w && cargo xtask ci", "cargo test; cargo check | tail -1"]) {
+        expect(decideCommand(rules, wrapped(command), env)).toEqual({ kind: "allow" });
+      }
+    });
+  });
+
   test("a folder or file merely named omp-coord does not exempt a command from its queue", () => {
     for (const command of ["cd /work/omp-coord && cargo test", "cargo test 2>&1 | tee /tmp/omp-coord"]) {
       expect(decideCommand(rules, command, runner).kind).toBe("queue");

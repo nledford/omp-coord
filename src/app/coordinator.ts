@@ -9,6 +9,7 @@ import {
   agentEnded,
   agentStarted,
   expire,
+  type NewHold,
   requestSpawn,
   type SpawnDecision,
   type SpawnRequest,
@@ -49,7 +50,7 @@ export interface SessionIdentity {
 export interface TickResult {
   label: string;
   inbox: { from: string; toAgent: string | undefined; text: string; sentAt: number }[];
-  holds: { pool: string; until: number }[];
+  holds: NewHold[];
   /** Runs of this session's agents that just passed their runtime limit; each is returned once. */
   overtime: OvertimeNotice[];
   board: Board;
