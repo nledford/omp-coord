@@ -85,6 +85,12 @@ describe("agents' bash commands", () => {
         "omp-coord run test -- cargo test & pkill y",
         "omp-coord run test -- cargo test\npkill y",
         "omp-coord run test -- cargo test $(pkill y)",
+        // shell syntax that hides a second command from a scanner reading the text a character at a time
+        "omp-coord run x \\>& pkill y",
+        "omp-coord run x ${y:- # } ; pkill z",
+        "omp-coord run x\\\n#; pkill y",
+        "omp-coord run x $'\\''&pkill\n$(<\\'x",
+        "omp-coord run x &>& pkill y",
         `${wrapped("cargo test")}; pkill y`,
         `${wrapped("cargo test")} && pkill y`,
         "echo omp-coord run; pkill y",

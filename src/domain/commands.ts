@@ -100,19 +100,27 @@ function isWrapper(command: string, runner: Runner): boolean {
 }
 
 /**
- * Whether the rest of a command line is arguments of one simple command: no unquoted `;`, `&&`, `||`, `|`, `&`
- * (a redirection such as `2>&1` or `&>` is not one), newline, parenthesis, backtick or `$(`, and no `$(` or backtick inside
- * double quotes. A quote left open makes it false.
+ * Whether the rest of a command line is arguments of one simple command. False when anything could start another
+ * command or change how the rest is read: an unquoted `;`, `&&`, `||`, `|`, `&` (a redirection such as `2>&1` or
+ * `&>` is not one), newline, parenthesis, backtick, `$(`, `${`, `$'` or `$"`; a backslash before a newline; a `$(` or
+ * backtick inside double quotes; a quote left open. A `#` starts a comment only after whitespace, never after an
+ * escape or a quote. Anything unsure is "no": the command then goes to the rules, which cost a queue wait at worst.
  */
 function isSingleCommand(rest: string): boolean {
   let i = 0;
+  /** The previous character when it was an unquoted, unescaped one on its own; "" after an escape or a quote. */
+  let prev = " ";
   while (i < rest.length) {
     const c = rest[i] as string;
-    if (c === "\\") i += 2;
-    else if (c === "'") {
+    if (c === "\\") {
+      if (rest[i + 1] === "\n") return false;
+      i += 2;
+      prev = "";
+    } else if (c === "'") {
       const close = rest.indexOf("'", i + 1);
       if (close < 0) return false;
       i = close + 1;
+      prev = "";
     } else if (c === '"') {
       i++;
       while (i < rest.length && rest[i] !== '"') {
@@ -122,15 +130,23 @@ function isSingleCommand(rest: string): boolean {
       }
       if (i >= rest.length) return false;
       i++;
-    } else if (c === "&" && (rest[i - 1] === ">" || rest[i - 1] === "<" || rest[i + 1] === ">")) {
-      i += rest[i + 1] === ">" ? 2 : 1;
-    } else if (c === "#" && /\s/.test(rest[i - 1] ?? " ")) {
+      prev = "";
+    } else if (c === "&" && rest[i + 1] === ">") {
+      i += 2;
+      prev = "";
+    } else if (c === "&" && (prev === ">" || prev === "<")) {
+      i++;
+      prev = "&";
+    } else if (c === "#" && /\s/.test(prev)) {
       // a comment runs to the end of the line; a newline after it is judged like any other
       const end = rest.indexOf("\n", i);
       i = end < 0 ? rest.length : end;
-    } else if (";&|\n()`".includes(c) || (c === "$" && rest[i + 1] === "(")) {
+    } else if (";&|\n()`".includes(c) || (c === "$" && "('\"{".includes(rest[i + 1] ?? "x"))) {
       return false;
-    } else i++;
+    } else {
+      i++;
+      prev = c;
+    }
   }
   return true;
 }

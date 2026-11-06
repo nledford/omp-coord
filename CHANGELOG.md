@@ -8,7 +8,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ### Fixed
 
-- A command no longer skips every `commands` rule because it contains `omp-coord run` or the runner's words: `omp-coord run x; pkill y` was allowed whole, whatever the rules said. Only a command that is the wrapper itself (this extension's rewrite, or `omp-coord run …`, at the start of the command, with no `;`, `&&`, `||`, `|`, `&`, newline, subshell or command substitution after it) is left alone and not queued twice; any other command is judged by the rules. A command such as `cd /w && omp-coord run test -- cargo test` is therefore no longer exempt and matches a `queue` rule on `cargo test` as it reads.
+- A command no longer skips every `commands` rule because it contains `omp-coord run` or the runner's words: `omp-coord run x; pkill y` was allowed whole, whatever the rules said. Only a command that is the wrapper itself (this extension's rewrite, or `omp-coord run …`, at the start of the command, with nothing after it that could start another command: `;`, `&&`, `||`, `|`, `&`, a newline, a subshell, `$(`, a backtick, `${`, `$'`) is left alone and not queued twice; any other command is judged by the rules. A command such as `cd /w && omp-coord run test -- cargo test` is therefore no longer exempt and matches a `queue` rule on `cargo test` as it reads. What follows `--` in a plain `omp-coord run <queue> -- <command>` is still not judged (documented in `docs/queues.md`).
 
 ### Changed
 
