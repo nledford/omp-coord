@@ -8,7 +8,7 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ### Fixed
 
-- A `commands` rule no longer matches the body of a heredoc that only reads it as text, so a note, commit message or PR body that names `pkill` or `sed -i` is no longer refused (and one that names `cargo test` is no longer queued). The body is blanked only for `cat`, `tee`, `git commit`/`tag`/`merge`/`am`/`apply`/`notes` and `gh pr`/`gh issue` on a line that is that one command, with a quoted delimiter or a body without `$(`, `${` or a backtick; the `<<` line, the delimiter line and everything after it are judged as written, and a heredoc a shell or interpreter reads, or one the scan cannot read with certainty, is judged whole as before ([what a rule reads](docs/queues.md#what-a-rule-reads)).
+- A `commands` rule no longer matches the body of a heredoc that only reads it as text, so a note, commit message or PR body that names `pkill` or `sed -i` is no longer refused (and one that names `cargo test` is no longer queued). The body is blanked only for `cat`, `tee`, `git commit`/`tag`/`merge`/`am`/`apply`/`notes` and `gh pr`/`gh issue` on a line that is that one command, without `-c`, `-e`, `--edit` or `--editor` for git, and with a quoted delimiter or a body without `$(`, `${`, a backtick or a line ending in a backslash; the `<<` line, the delimiter line and everything after it are judged as written, and a heredoc a shell or interpreter reads, or one the scan cannot read with certainty, is judged whole as before ([what a rule reads](docs/queues.md#what-a-rule-reads)).
 - Docs: a `commands` pattern is a regex without flags (case-sensitive; `^` and `$` anchor the whole command).
 
 ### Changed

@@ -13,9 +13,15 @@
 /** What replaces each character of a blanked body (its line breaks stay, so positions and lengths are kept). */
 const BLANK = "_";
 
-/** Commands that only read a heredoc as text: `cat` and `tee`, `git` messages and patches, `gh` PR and issue text. */
+/**
+ * Commands that only read a heredoc as text: `cat` and `tee`, `git` messages and patches (`-C <dir>` only: a `-c`
+ * setting such as `core.editor` can make git run what it reads), `gh` PR and issue text.
+ */
 const TEXT_CONSUMER =
-  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-[Cc][ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|am|apply|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
+  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|am|apply|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
+
+/** `git commit -e -F -` runs the editor on the message it read: `--edit`, `--editor`, and `-e` alone or in a cluster. */
+const EDITS = /[ \t](?:--edit[\w=-]*|-[A-Za-z]*e[A-Za-z]*)(?=[ \t]|$)/;
 
 /** Characters that start another command, a substitution, a redirection to a process, a comment or an escape. */
 const NOT_SIMPLE = /[;&|(){}<`$#\\!]/;
@@ -23,8 +29,11 @@ const NOT_SIMPLE = /[;&|(){}<`$#\\!]/;
 /** `<<`, an optional `-`, and the delimiter word: quoted (no expansion in the body), escaped, or bare. */
 const OPERATOR = /^<<(-?)[ \t]*(?:'([\w.-]+)'|"([\w.-]+)"|\\(\w+)|(\w+))(?=$|[ \t>])/;
 
-/** The body of an unquoted heredoc is expanded: a command substitution or parameter expansion in it runs or acts. */
-const EXPANDS = /\$[({]|`/;
+/**
+ * What the shell does with the body of a heredoc whose delimiter is not quoted: a substitution or parameter expansion
+ * runs or acts, and a backslash at the end of a line joins it to the next (which can build a `$(` or the delimiter).
+ */
+const READ_BY_SHELL = /\$[({]|`|\\$/;
 
 interface Scanned {
   /** Quote state at the end of the line. */
@@ -66,6 +75,14 @@ function scan(line: string, quote: "" | "'" | '"'): Scanned | undefined {
   return { quote, operators };
 }
 
+/** The first line from `from` that is the delimiter (`<<-` strips leading tabs first), or -1. */
+function findDelimiter(lines: string[], from: number, delimiter: string, stripTabs: boolean): number {
+  for (let k = from; k < lines.length; k++) {
+    if ((stripTabs ? (lines[k] as string).replace(/^\t+/, "") : lines[k]) === delimiter) return k;
+  }
+  return -1;
+}
+
 /**
  * The command with each heredoc body blanked (`_` for every character but line breaks), where the heredoc is read
  * with certainty and its command only reads it as text. Everything else comes back as it was.
@@ -86,12 +103,12 @@ export function blankHeredocBodies(command: string): string {
     const op = OPERATOR.exec(line.slice(start));
     if (op === null || more.length > 0 || startQuote !== "" || quote !== "") break;
     const rest = line.slice(0, start) + line.slice(start + op[0].length);
-    if (!TEXT_CONSUMER.test(rest) || NOT_SIMPLE.test(rest)) break;
+    if (!TEXT_CONSUMER.test(rest) || NOT_SIMPLE.test(rest) || EDITS.test(rest)) break;
     const delimiter = op[2] ?? op[3] ?? op[4] ?? (op[5] as string);
-    const end = lines.findIndex((l, k) => k > i && (op[1] === "-" ? l.replace(/^\t+/, "") : l) === delimiter);
+    const end = findDelimiter(lines, i + 1, delimiter, op[1] === "-");
     if (end < 0) break;
-    const expands = op[5] !== undefined && lines.slice(i + 1, end).some(l => EXPANDS.test(l));
-    if (!expands) for (let k = i + 1; k < end; k++) lines[k] = (lines[k] as string).replace(/[^\n]/g, BLANK);
+    const live = op[5] !== undefined && lines.slice(i + 1, end).some(l => READ_BY_SHELL.test(l));
+    if (!live) for (let k = i + 1; k < end; k++) lines[k] = (lines[k] as string).replace(/[^\n]/g, BLANK);
     i = end;
   }
   return lines.join("\n");

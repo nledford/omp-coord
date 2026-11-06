@@ -24,6 +24,16 @@ describe("heredoc bodies are text the rules do not judge", () => {
     "cat <<EOF\nplain text, $HOME and pkill\nEOF",
     "cat <<'A' > a.md\npkill\nA\ncat <<'B' > b.md\npkill\nB",
     "echo start\ncat <<'EOF' > n.md\npkill x\nEOF",
+    "cat <<'EOF'\n$(pkill x) and `pkill y` stay text when the delimiter is quoted\nEOF",
+    "cat << 'EOF'\npkill x\nEOF",
+    "cat <<EOF>n.md\npkill x\nEOF",
+    "cat <<< 'x'\ncat <<'EOF'\npkill x\nEOF",
+    "git tag -a v1 -F - <<'EOF'\npkill x\nEOF",
+    "git merge --no-edit topic -F - <<'EOF'\npkill x\nEOF",
+    "git am <<'EOF'\n+ pkill x\nEOF",
+    "git apply <<'EOF'\n+ pkill x\nEOF",
+    "git notes add -F - <<'EOF'\npkill x\nEOF",
+    "gh issue comment 7 --body-file - <<'EOF'\npkill x\nEOF",
   ])("allowed: %j", command => {
     expect(kind(command)).toBe("allow");
   });
@@ -63,6 +73,17 @@ describe("everything but a heredoc body is judged as written", () => {
     ["a heredoc fed through a wrapper", "env cat <<'EOF'\npkill x\nEOF"],
     ["a heredoc on a line with a pipe", "cat <<'EOF' | tee n.md\npkill x\nEOF"],
     ["a git subcommand that is not a message or patch", "git bisect run sh <<'EOF'\npkill x\nEOF"],
+    ["a bare delimiter whose body joins lines into the delimiter", "cat <<EOF\nE\\\nOF\npkill x\nEOF"],
+    ["a bare delimiter whose body joins lines into a substitution", "cat <<EOF\n$\\\n(pkill x)\nEOF"],
+    ["git told to edit the message it read", "git commit -e -F - <<'EOF'\npkill x\nEOF"],
+    ["git told to edit, in a cluster of flags", "git commit -ae -F - <<'EOF'\npkill x\nEOF"],
+    ["git told to edit, spelled out", "git commit --edit -F - <<'EOF'\npkill x\nEOF"],
+    ["git told which editor", "git tag -a --editor=sh -F - <<'EOF'\npkill x\nEOF"],
+    ["git with a setting that can run the message", "git -c core.editor=sh commit -e -F - <<'EOF'\npkill x\nEOF"],
+    ["git with any -c setting", "git -c core.editor=sh commit -F - <<'EOF'\npkill x\nEOF"],
+    ["a second heredoc inside the first one's body", "cat <<'A' > a\ncat <<'B'\nA\npkill x\nB"],
+    ["a delimiter word glued to more text", "cat <<'EOF'x\npkill x\nEOF"],
+    ["a delimiter that is a variable", "cat <<$X\npkill x\n$X"],
   ])("refused: %s", (_name, command) => {
     expect(kind(command)).toBe("refuse");
   });
@@ -91,5 +112,33 @@ describe("blankHeredocBodies", () => {
   test("a command it cannot read with certainty comes back unchanged", () => {
     for (const command of ["cat <<'EOF'\nx", "cat <<EOF\n$(x)\nEOF", "echo 'a\ncat <<'E'\nx\nE", "cat <<'E'\r\nx\r\nE"])
       expect(blankHeredocBodies(command)).toBe(command);
+  });
+});
+
+describe("a << line that is more than one simple command leaves its body judged", () => {
+  // the body is what trips the rule, so these fail unless the line itself was what kept the body visible
+  test.each([
+    "; true",
+    " && true",
+    " | cat",
+    " & true",
+    " $(true)",
+    " `true`",
+    " # comment",
+    " (true)",
+    " { true",
+    " !x",
+    " \\x",
+    " <(true)",
+    " <in.txt",
+  ])("cat <<'EOF' > n.md%s", suffix => {
+    expect(kind(`cat <<'EOF' > n.md${suffix}\npkill x\nEOF`)).toBe("refuse");
+  });
+
+  test("a file full of empty heredocs is read in linear time", () => {
+    const command = "cat <<A\nA\n".repeat(60_000);
+    const started = performance.now();
+    blankHeredocBodies(command);
+    expect(performance.now() - started).toBeLessThan(1500);
   });
 });
