@@ -20,8 +20,11 @@ const BLANK = "_";
 const TEXT_CONSUMER =
   /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|am|apply|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
 
-/** `git commit -e -F -` runs the editor on the message it read: `--edit`, `--editor`, and `-e` alone or in a cluster. */
-const EDITS = /[ \t](?:--edit[\w=-]*|-[A-Za-z]*e[A-Za-z]*)(?=[ \t]|$)/;
+/**
+ * `git commit -e -F -` runs the editor on the message it read, and git takes option prefixes (`--ed`) and values
+ * attached to a flag (`-eF-`): any long option starting `--e` and any short flag cluster holding an `e`.
+ */
+const EDITS = /[ \t]-(?:-e|[A-Za-z]*e)/;
 
 /** Characters that start another command, a substitution, a redirection to a process, a comment or an escape. */
 const NOT_SIMPLE = /[;&|(){}<`$#\\!]/;

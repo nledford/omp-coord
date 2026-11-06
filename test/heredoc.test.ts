@@ -84,6 +84,15 @@ describe("everything but a heredoc body is judged as written", () => {
     ["a second heredoc inside the first one's body", "cat <<'A' > a\ncat <<'B'\nA\npkill x\nB"],
     ["a delimiter word glued to more text", "cat <<'EOF'x\npkill x\nEOF"],
     ["a delimiter that is a variable", "cat <<$X\npkill x\n$X"],
+    ["git told to edit, by an abbreviation", "git commit --ed -F - <<'EOF'\npkill x\nEOF"],
+    ["git told to edit, by a shorter abbreviation", "git commit --e -F - <<'EOF'\npkill x\nEOF"],
+    ["git told to edit, with the message attached", "git commit -eF- <<'EOF'\npkill x\nEOF"],
+    ["git told to edit, after the message", "git tag -a -F - -e <<'EOF'\npkill x\nEOF"],
+    [
+      "a heredoc the first one's body only looks like (a live body is still skipped whole)",
+      "cat <<A\ncat <<'B'\n$(x)\nA\npkill x\nB",
+    ],
+    ["a command right after an empty heredoc", "cat <<'A'\nA\npkill x\nA"],
   ])("refused: %s", (_name, command) => {
     expect(kind(command)).toBe("refuse");
   });
