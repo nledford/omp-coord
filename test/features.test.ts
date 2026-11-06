@@ -181,6 +181,8 @@ describe("claims", () => {
 
     expect(by("git commit -am wip", "/repo/.claude/worktrees/w1/src")).toBe("/repo/.claude/worktrees/w1");
     expect(by("cd .claude/worktrees/w1 && git rebase origin/main")).toBe("/repo/.claude/worktrees/w1");
+    expect(by("git add -A", "/repo/.claude/worktrees/w1")).toBe("/repo/.claude/worktrees/w1");
+    expect(by("git bisect start", "/repo/.claude/worktrees/w1")).toBe("/repo/.claude/worktrees/w1");
     expect(by("git -C /repo/.claude/worktrees/w1 push fork HEAD")).toBe("/repo/.claude/worktrees/w1");
     expect(by("git push fork fix-x")).toBe("fix-x");
     expect(by("git push --force-with-lease fork fix-x:fix-x")).toBe("fix-x");

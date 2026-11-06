@@ -6,6 +6,10 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Changed
+
+- Claims now also guard `git add` and `git bisect` in a claimed worktree, and one list of git subcommands that change state serves claims and [protected checkouts](docs/protect.md#state-changing-git) (the protected-checkout docs now list `bisect`, which was already refused).
+
 ## [0.5.2] - 2026-11-06
 
 ### Fixed

@@ -41,6 +41,7 @@ Dependencies point inward only: adapters → app → domain. The domain imports 
 | `src/domain/overview.ts` | The board as plain data: `statusView` (what `omp-coord status --json` prints; its field names are contract) and `agentList` (the running agents, for text and JSON). |
 | `src/domain/history.ts` | Reports from the event log: agents interrupted by a session leaving, daily statistics. |
 | `src/domain/commands.ts` | Decides what happens to an agent's bash command: allow, refuse, or rewrite to run through a queue. |
+| `src/domain/git.ts` | The one list of git subcommands that change state, for `protect.ts` and `claims.ts`. |
 | `src/app/ports.ts` | What the app needs from outside: `BoardRepository`, `Liveness`, `Listener`, `Clock`, `LoadProbe`. |
 | `src/app/coordinator.ts` | Session use cases: join, leave, tick, spawn decisions, agent runs, messages, pause, claims, notes, ports, reports, pruning dead sessions and jobs. |
 | `src/app/job-runner.ts` | The runner use case: join a queue, wait (dropping dead runners, recording load), run within the time limit, leave with the exit code. |
