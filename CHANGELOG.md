@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-11-06
+
 ### Fixed
 
 - A `commands` rule no longer matches the body of a heredoc that only reads it as text, so a note, commit message or PR body that names `pkill` or `sed -i` is no longer refused (and one that names `cargo test` is no longer queued). The body is blanked only for `cat`, `tee`, `git commit`/`tag`/`notes` with `-F -` (or `--file=-`) and no other option that takes a value, quoted word or `--` and `gh pr`/`gh issue` on a line that is that one command, without `-c` or an editor flag (`-e`, a short-flag cluster holding an `e`, `--e…`) for git, and with a quoted delimiter or a body without `$(`, `${`, a backtick or a line ending in a backslash; the `<<` line, the delimiter line and everything after it are judged as written, and a heredoc a shell or interpreter reads, or one the scan cannot read with certainty, is judged whole as before ([what a rule reads](docs/queues.md#what-a-rule-reads)).
@@ -159,7 +161,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/nledford/omp-coord/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/nledford/omp-coord/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/nledford/omp-coord/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nledford/omp-coord/compare/v0.4.2...v0.5.0
