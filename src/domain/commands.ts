@@ -85,6 +85,9 @@ function wrapperPrefix(runner: Runner): string[] {
   ];
 }
 
+/** The blanks a shell skips before a command: not `\s`, which also matches NBSP and other Unicode spaces. */
+const SHELL_BLANKS = /^[ \t\n]+/;
+
 /**
  * Whether the whole command is one `omp-coord run` invocation: it starts with the rewritten prefix (`wrapperPrefix`),
  * the runner's argv and `run`, or `omp-coord run`, and no further command follows it. A command that merely contains
@@ -92,19 +95,20 @@ function wrapperPrefix(runner: Runner): string[] {
  */
 function isWrapper(command: string, runner: Runner): boolean {
   const starts = [wrapperPrefix(runner).join(" "), [...runner.argv.map(quote), "run"].join(" "), ...BARE_RUNNERS];
-  const start = command.trimStart();
+  const start = command.replace(SHELL_BLANKS, "");
   const prefix = starts.find(
-    p => start.startsWith(p) && (start.length === p.length || /\s/.test(start[p.length] as string)),
+    p => start.startsWith(p) && (start.length === p.length || " \t\n".includes(start[p.length] as string)),
   );
   return prefix !== undefined && isSingleCommand(start.slice(prefix.length));
 }
 
 /**
  * Whether the rest of a command line is arguments of one simple command. False when anything could start another
- * command or change how the rest is read: an unquoted `;`, `&&`, `||`, `|`, `&` (a redirection such as `2>&1` or
- * `&>` is not one), newline, parenthesis, backtick, `$(`, `${`, `$'` or `$"`; a backslash before a newline; a `$(` or
- * backtick inside double quotes; a quote left open. A `#` starts a comment only after whitespace, never after an
- * escape or a quote. Anything unsure is "no": the command then goes to the rules, which cost a queue wait at worst.
+ * command or change how the rest is read: an unquoted `;`, `&&`, `||`, `|`, `&` (also in `&>` and `&>>`, which only
+ * bash reads as a redirection; `2>&1` is not a break), newline, parenthesis, backtick, `$(`, `${`, `$'` or `$"`; a
+ * backslash before a newline; a `$(` or backtick inside double quotes; a quote left open. A `#` starts a comment only
+ * after a space or tab, never after an escape or a quote. Anything unsure is "no": the command then goes to the rules,
+ * which cost a queue wait at worst.
  */
 function isSingleCommand(rest: string): boolean {
   let i = 0;
@@ -130,9 +134,6 @@ function isSingleCommand(rest: string): boolean {
       }
       if (i >= rest.length) return false;
       i++;
-      prev = "";
-    } else if (c === "&" && rest[i + 1] === ">") {
-      i += 2;
       prev = "";
     } else if (c === "&" && (prev === ">" || prev === "<")) {
       i++;

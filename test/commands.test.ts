@@ -91,6 +91,13 @@ describe("agents' bash commands", () => {
         "omp-coord run x\\\n#; pkill y",
         "omp-coord run x $'\\''&pkill\n$(<\\'x",
         "omp-coord run x &>& pkill y",
+        // `&>` is a redirection only in bash: sh runs `x &` and then `pkill y` with a redirect
+        "omp-coord run x &> out pkill y",
+        "omp-coord run x &>> out pkill y",
+        // the shell's blanks are space, tab and newline; NBSP and other Unicode spaces are word characters
+        "\u00a0omp-coord run x -- pkill y",
+        "\u2003omp-coord run x -- pkill y",
+        "omp-coord run\u00a0-- pkill y",
         // only a space or a tab ends a word before a comment: these are word characters to the shell
         "omp-coord run x\f# ; pkill y",
         "omp-coord run x\u00a0# ; pkill y",
