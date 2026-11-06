@@ -181,6 +181,36 @@ describe("board store", () => {
     ]);
   });
 
+  test("a place in line keeps the agent that was refused, and a board made before tickets recorded it gains the columns", () => {
+    const db = freshDb();
+    new BoardStore(db).close();
+    const old = new Database(db);
+    old.exec("ALTER TABLE tickets DROP COLUMN agent_type");
+    old.exec("ALTER TABLE tickets DROP COLUMN agent_name");
+    old.close();
+    const store = new BoardStore(db);
+    store.transact(b => {
+      join_("a")(b);
+      join_("b")(b);
+      b.waitlist.push(
+        {
+          sessionId: "a",
+          pool: "work",
+          since: 1,
+          holdUntil: undefined,
+          notified: false,
+          agentType: "task",
+          agentName: "Kid",
+        },
+        { sessionId: "b", pool: "work", since: 2, holdUntil: undefined, notified: false },
+      );
+    });
+    expect(store.read().waitlist.map(t => [t.sessionId, t.agentType, t.agentName])).toEqual([
+      ["a", "task", "Kid"],
+      ["b", undefined, undefined],
+    ]);
+  });
+
   test("the omp session ids of the main session and a subagent round-trip, and a board made before they were recorded gains the columns", () => {
     const db = freshDb();
     new BoardStore(db).close();

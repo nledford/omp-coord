@@ -68,6 +68,58 @@ describe("agents' bash commands", () => {
     expect(decideCommand(rules, "ls -la", runner)).toEqual({ kind: "allow" });
   });
 
+  describe("a command that merely mentions the wrapper is still judged", () => {
+    const env = { ...runner, env: { BUN_BE_BUN: "1" } };
+    const wrapped = (command: string) => {
+      const d = decideCommand(rules, command, env);
+      if (d.kind !== "queue") throw new Error(`expected a queue decision for ${command}`);
+      return d.command;
+    };
+
+    test("a refused command after the wrapper, or around its words, is refused", () => {
+      for (const command of [
+        "omp-coord run x; pkill y",
+        "omp-coord run test -- cargo test && pkill y",
+        "omp-coord run test -- cargo test || pkill y",
+        "omp-coord run test -- cargo test | pkill y",
+        "omp-coord run test -- cargo test & pkill y",
+        "omp-coord run test -- cargo test\npkill y",
+        "omp-coord run test -- cargo test $(pkill y)",
+        `${wrapped("cargo test")}; pkill y`,
+        `${wrapped("cargo test")} && pkill y`,
+        "echo omp-coord run; pkill y",
+        "cd /w && omp-coord run test -- cargo test; pkill y",
+        "pkill -f '/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts'",
+        "echo '/usr/local/bin/bun' '/opt/omp-coord/src/cli.ts'; pkill y",
+      ]) {
+        expect(decideCommand(rules, command, env), command).toEqual({
+          kind: "refuse",
+          reason: "stop only your own process",
+        });
+      }
+    });
+
+    test("a command substitution after the wrapper reaches the rules instead of skipping them", () => {
+      // the rule patterns here do not look inside backticks; what matters is that the early allow is gone
+      expect(decideCommand(rules, "omp-coord run test -- cargo test `pkill y`", env).kind).toBe("queue");
+    });
+
+    test("the wrapper as this extension writes it, and a bare `omp-coord run`, are allowed", () => {
+      const real = wrapped("cd /w && cargo test -p core 'a b'; echo \"$(date)\" | tee x");
+      expect(decideCommand(rules, real, env)).toEqual({ kind: "allow" });
+      expect(decideCommand(rules, "omp-coord run test -- cargo test -p core 2>&1", env)).toEqual({ kind: "allow" });
+      expect(decideCommand(rules, "omp-coord run test --owner s1 -- sh -c 'cargo test; echo done'", env)).toEqual({
+        kind: "allow",
+      });
+    });
+
+    test("a queued command is not wrapped a second time", () => {
+      for (const command of ["cargo test", "cd /w && cargo xtask ci", "cargo test; cargo check | tail -1"]) {
+        expect(decideCommand(rules, wrapped(command), env)).toEqual({ kind: "allow" });
+      }
+    });
+  });
+
   test("a folder or file merely named omp-coord does not exempt a command from its queue", () => {
     for (const command of ["cd /work/omp-coord && cargo test", "cargo test 2>&1 | tee /tmp/omp-coord"]) {
       expect(decideCommand(rules, command, runner).kind).toBe("queue");

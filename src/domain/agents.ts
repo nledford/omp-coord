@@ -4,7 +4,7 @@
  */
 import { pauseReason } from "./control.ts";
 import { currentLoad, limitUnderLoad } from "./limits.ts";
-import { type AgentPolicy, type Board, emit } from "./model.ts";
+import { type AgentPolicy, type Board, emit, type Ticket } from "./model.ts";
 
 export function poolFor(policy: AgentPolicy, agentType: string): string | null {
   if (policy.exempt.includes(agentType)) return null;
@@ -90,7 +90,15 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
     return { allowed: true, pool };
   }
 
-  const ticket = mine ?? { sessionId: req.sessionId, pool, since: req.now, holdUntil: undefined, notified: false };
+  const ticket: Ticket = mine ?? {
+    sessionId: req.sessionId,
+    pool,
+    since: req.now,
+    holdUntil: undefined,
+    notified: false,
+    agentType: req.agentType,
+    ...(req.spawnKey === undefined ? {} : { agentName: req.spawnKey }),
+  };
   if (!mine) board.waitlist.push(ticket);
   const line = board.waitlist.filter(t => t.pool === pool).sort((a, b) => a.since - b.since);
   const position = line.indexOf(ticket) + 1;
@@ -112,7 +120,7 @@ export function requestSpawn(board: Board, policy: AgentPolicy, req: SpawnReques
     allowed: false,
     pool,
     position,
-    reason: `${why}. This session is #${position} in line for a ${pool} slot. Start nothing else now; you will get a message when a slot is held for you.`,
+    reason: `${why}. This spawn did NOT start, and it will not start by itself. This session is #${position} in line for a ${pool} slot. Start nothing else now; when you get a message that a slot is held for you, start the agent again.`,
   };
 }
 
@@ -266,11 +274,24 @@ export function grantHolds(board: Board, policy: AgentPolicy, now: number): void
   }
 }
 
+/** A slot held for a session, with the refused agent it is held for (absent on a place in line an older omp-coord made). */
+export interface NewHold {
+  pool: string;
+  until: number;
+  agentType?: string;
+  agentName?: string;
+}
+
 /** Holds granted to a session that it has not been told about yet; marks them told. */
-export function takeNewHolds(board: Board, sessionId: string): { pool: string; until: number }[] {
+export function takeNewHolds(board: Board, sessionId: string): NewHold[] {
   const fresh = board.waitlist.filter(t => t.sessionId === sessionId && t.holdUntil !== undefined && !t.notified);
   for (const t of fresh) t.notified = true;
-  return fresh.map(t => ({ pool: t.pool, until: t.holdUntil as number }));
+  return fresh.map(t => ({
+    pool: t.pool,
+    until: t.holdUntil as number,
+    ...(t.agentType === undefined ? {} : { agentType: t.agentType }),
+    ...(t.agentName === undefined ? {} : { agentName: t.agentName }),
+  }));
 }
 function listOr(items: string[]): string {
   if (items.length === 0) return "nothing";

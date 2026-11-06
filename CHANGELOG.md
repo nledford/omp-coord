@@ -6,6 +6,14 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- A command no longer skips every `commands` rule because it contains `omp-coord run` or the runner's words: `omp-coord run x; pkill y` was allowed whole, whatever the rules said. Only a command that is the wrapper itself (this extension's rewrite, or `omp-coord run …`, at the start of the command, with no `;`, `&&`, `||`, `|`, `&`, newline, subshell or command substitution after it) is left alone and not queued twice; any other command is judged by the rules. A command such as `cd /w && omp-coord run test -- cargo test` is therefore no longer exempt and matches a `queue` rule on `cargo test` as it reads.
+
+### Changed
+
+- A spawn refused for a full pool (or a pause) now says plainly that it did NOT start and must be started again when the message that a slot is held arrives. That message names the refused agent: its type, and its name when omp gave one (the first spawn refused in the session's place in line). The tickets table gains nullable `agent_type` and `agent_name` columns (no schema version bump); a place in line made by an older omp-coord has none, and its notice does not name an agent.
+
 ## [0.5.1] - 2026-11-03
 
 ### Added

@@ -684,10 +684,16 @@ async function tick(rt: Runtime): Promise<void> {
     }
   }
   for (const h of holds) {
+    const refused =
+      h.agentType === undefined
+        ? "the agent that was refused"
+        : h.agentName === undefined
+          ? `the ${h.agentType} agent that was refused`
+          : `the ${h.agentType} agent ${h.agentName} that was refused`;
     deliver(
       rt.pi,
       `[omp-coord] A ${h.pool} slot is free and held for this session until ${clock(h.until)}. ` +
-        `Start the agent that was refused now; if you no longer need it, ignore this and the slot passes on at ${clock(h.until)}.`,
+        `That spawn did not start: start ${refused} again now; if you no longer need it, ignore this and the slot passes on at ${clock(h.until)}.`,
     );
   }
 

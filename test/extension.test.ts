@@ -271,4 +271,32 @@ describe("the omp adapter's tools", () => {
       }
     });
   });
+
+  describe("a refused spawn", () => {
+    test("says it did not start, and the hold notice names the agent to start again", async () => {
+      const { m } = await sessions();
+      const other = peer();
+      try {
+        for (const id of ["P1", "P2"]) {
+          const ask = { sessionId: "peer", parentAgentId: "Main", parentIsSubagent: false, agentType: "task" };
+          expect(other.coordinator.requestSpawn({ ...ask, spawnKey: id }).allowed).toBe(true);
+          other.coordinator.agentStarted({ ...ask, agentId: id, parentId: "Main" });
+        }
+        const refusal = (await m.fire("before_subagent_spawn", main, { agent: "task", spawnKey: "CatalogTests" })) as {
+          block: boolean;
+          reason: string;
+        };
+        expect(refusal.block).toBe(true);
+        expect(refusal.reason).toContain("This spawn did NOT start");
+
+        other.coordinator.agentEnded({ sessionId: "peer", agentId: "P1" });
+        for (const tick of timers) await tick();
+        const notice = m.sent.join("\n");
+        expect(notice).toContain("slot is free and held for this session");
+        expect(notice).toContain("start the task agent CatalogTests that was refused again now");
+      } finally {
+        other.close();
+      }
+    });
+  });
 });

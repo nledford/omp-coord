@@ -42,9 +42,8 @@ export function decideCommand(
   runner: Runner,
   agentKind: "main" | "sub" = "sub",
 ): CommandDecision {
-  // Already queued: a command that runs `omp-coord run`, or one this extension rewrote.
-  if (/(^|[;&|(\s'"/])omp-coord'?\s+'?run\b/.test(command) || runner.argv.every(a => command.includes(a)))
-    return { kind: "allow" };
+  // Already queued: the command is the wrapper (this extension's rewrite, or a plain `omp-coord run`) and nothing else.
+  if (isWrapper(command, runner)) return { kind: "allow" };
   const applies = (r: CommandRule) => r.agents !== "sub" || agentKind === "sub";
   if (command.length > MAX_CHECKED_COMMAND && rules.some(r => r.action === "refuse" && applies(r)))
     return {
@@ -55,10 +54,7 @@ export function decideCommand(
   if (!rule) return { kind: "allow" };
   if (rule.action === "refuse") return { kind: "refuse", reason: rule.reason };
   const wrapped = [
-    `OMP_COORD_CONFIG=${quote(runner.config)}`,
-    ...Object.entries(runner.env ?? {}).map(([k, v]) => `${k}=${quote(v)}`),
-    ...runner.argv.map(quote),
-    "run",
+    ...wrapperPrefix(runner),
     quote(rule.queue),
     ...(rule.lane === undefined ? [] : ["--lane", quote(rule.lane)]),
     "--owner",
@@ -74,4 +70,67 @@ export function decideCommand(
 /** Single-quotes a word for sh. */
 function quote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+/** How an agent may write the runner without this extension's rewrite. */
+const BARE_RUNNERS = ["omp-coord run", "'omp-coord' run", '"omp-coord" run'];
+
+/** The words that start a rewritten command, up to and including `run`: the config, the runner's environment and argv. */
+function wrapperPrefix(runner: Runner): string[] {
+  return [
+    `OMP_COORD_CONFIG=${quote(runner.config)}`,
+    ...Object.entries(runner.env ?? {}).map(([k, v]) => `${k}=${quote(v)}`),
+    ...runner.argv.map(quote),
+    "run",
+  ];
+}
+
+/**
+ * Whether the whole command is one `omp-coord run` invocation: it starts with the rewritten prefix (`wrapperPrefix`),
+ * the runner's argv and `run`, or `omp-coord run`, and no further command follows it. A command that merely contains
+ * those words (`omp-coord run x; pkill y`, `echo omp-coord run; …`) is judged by the rules like any other.
+ */
+function isWrapper(command: string, runner: Runner): boolean {
+  const starts = [wrapperPrefix(runner).join(" "), [...runner.argv.map(quote), "run"].join(" "), ...BARE_RUNNERS];
+  const start = command.trimStart();
+  const prefix = starts.find(
+    p => start.startsWith(p) && (start.length === p.length || /\s/.test(start[p.length] as string)),
+  );
+  return prefix !== undefined && isSingleCommand(start.slice(prefix.length));
+}
+
+/**
+ * Whether the rest of a command line is arguments of one simple command: no unquoted `;`, `&&`, `||`, `|`, `&`
+ * (a redirection such as `2>&1` or `&>` is not one), newline, parenthesis, backtick or `$(`, and no `$(` or backtick inside
+ * double quotes. A quote left open makes it false.
+ */
+function isSingleCommand(rest: string): boolean {
+  let i = 0;
+  while (i < rest.length) {
+    const c = rest[i] as string;
+    if (c === "\\") i += 2;
+    else if (c === "'") {
+      const close = rest.indexOf("'", i + 1);
+      if (close < 0) return false;
+      i = close + 1;
+    } else if (c === '"') {
+      i++;
+      while (i < rest.length && rest[i] !== '"') {
+        if (rest[i] === "\\") i++;
+        else if (rest[i] === "`" || (rest[i] === "$" && rest[i + 1] === "(")) return false;
+        i++;
+      }
+      if (i >= rest.length) return false;
+      i++;
+    } else if (c === "&" && (rest[i - 1] === ">" || rest[i - 1] === "<" || rest[i + 1] === ">")) {
+      i += rest[i + 1] === ">" ? 2 : 1;
+    } else if (c === "#" && /\s/.test(rest[i - 1] ?? " ")) {
+      // a comment runs to the end of the line; a newline after it is judged like any other
+      const end = rest.indexOf("\n", i);
+      i = end < 0 ? rest.length : end;
+    } else if (";&|\n()`".includes(c) || (c === "$" && rest[i + 1] === "(")) {
+      return false;
+    } else i++;
+  }
+  return true;
 }
