@@ -101,10 +101,12 @@ export function refreshQueue(rt: Runtime): void {
   );
 }
 
+/** A tool's error answer when omp-coord is not active in this session (`shared.inactive` says why). */
 export function inactive(): ToolResult {
   return text(shared.inactive, true);
 }
 
+/** Delivers `content` through `binding` as an aside that starts a turn when the session is idle. */
 export function deliver(binding: ExtensionAPI, content: string): void {
   binding.sendMessage(
     { customType: MESSAGE_TYPE, content, display: true, attribution: "agent" },
@@ -112,6 +114,7 @@ export function deliver(binding: ExtensionAPI, content: string): void {
   );
 }
 
+/** Shows `message` in the session's UI; a session without a UI shows nothing. */
 export function notify(rt: Runtime, message: string, type: "info" | "warning" | "error"): void {
   if (rt.ctx.hasUI) rt.ctx.ui.notify(message, type);
 }
@@ -121,6 +124,7 @@ export function isTrackedSubagent(ctx: ExtensionContext): boolean {
   return ctx.agent.kind === "sub" && ctx.agent.id !== "advisor" && ctx.agent.name !== "advisor";
 }
 
+/** Runs `fn`; a failure becomes a notice ("omp-coord could not <what>") instead of reaching omp's hook runner. */
 export function guarded(rt: Runtime, what: string, fn: () => void): void {
   try {
     fn();
@@ -129,12 +133,14 @@ export function guarded(rt: Runtime, what: string, fn: () => void): void {
   }
 }
 
+/** A tool answer holding one text block; `isError` marks it as a failure. */
 export function text(body: string, isError = false): ToolResult {
   return isError
     ? { content: [{ type: "text", text: body }], isError: true }
     : { content: [{ type: "text", text: body }] };
 }
 
+/** The message of an error, or what any other thrown value stringifies to. */
 export function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

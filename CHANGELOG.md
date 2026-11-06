@@ -9,6 +9,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 ### Changed
 
 - Claims now also guard `git add` and `git bisect` in a claimed worktree, and one list of git subcommands that change state serves claims and [protected checkouts](docs/protect.md#state-changing-git) (the protected-checkout docs now list `bisect`, which was already refused).
+- Docs: the `coord_*` tools' parameters are listed (`coord_send` takes `to` and `text`, not `message`).
+- Internal: the omp adapter's `extension.ts` is split into wiring, `guards.ts`, `board.ts`, `notices.ts` and `runtime.ts`. No behavior change.
 
 ## [0.5.2] - 2026-11-06
 

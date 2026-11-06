@@ -1,11 +1,11 @@
 /**
- * What happens to an agent's bash command: the first matching rule refuses it, or rewrites it to run through a
- * queue (`omp-coord run <queue> -- sh -c '<command>'`), so it waits for a slot inside the bash call instead of
- * starting at once. omp's `tool_call` check must answer within 30 s, so waiting there is not an option.
- */
-/**
- * What happens to an agent's bash command that matches `pattern`: refused with a reason, or run through a queue.
- * `agents: "sub"` limits the rule to subagents' commands (the main agent's run as if it were not there); the default is all.
+ * What happens to an agent's bash command: the first matching rule refuses it, or rewrites it to run through a queue
+ * (`omp-coord run <queue> -- sh -c '<command>'`), so it waits for a slot inside the bash call instead of starting at
+ * once. omp's `tool_call` check must answer within 30 s, so waiting there is not an option.
+ *
+ * A rule is a regex over the command's text (case-sensitive, no flags; `^` and `$` anchor the whole command, not a
+ * line). `agents: "sub"` limits the rule to subagents' commands (the main agent's run as if it were not there); the
+ * default is all.
  */
 export type CommandRule =
   | { pattern: RegExp; action: "refuse"; reason: string; agents?: "all" | "sub" }
