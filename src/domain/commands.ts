@@ -137,7 +137,7 @@ function isSingleCommand(rest: string): boolean {
     } else if (c === "&" && (prev === ">" || prev === "<")) {
       i++;
       prev = "&";
-    } else if (c === "#" && /\s/.test(prev)) {
+    } else if (c === "#" && (prev === " " || prev === "\t")) {
       // a comment runs to the end of the line; a newline after it is judged like any other
       const end = rest.indexOf("\n", i);
       i = end < 0 ? rest.length : end;

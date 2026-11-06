@@ -91,6 +91,9 @@ describe("agents' bash commands", () => {
         "omp-coord run x\\\n#; pkill y",
         "omp-coord run x $'\\''&pkill\n$(<\\'x",
         "omp-coord run x &>& pkill y",
+        // only a space or a tab ends a word before a comment: these are word characters to the shell
+        "omp-coord run x\f# ; pkill y",
+        "omp-coord run x\u00a0# ; pkill y",
         `${wrapped("cargo test")}; pkill y`,
         `${wrapped("cargo test")} && pkill y`,
         "echo omp-coord run; pkill y",
