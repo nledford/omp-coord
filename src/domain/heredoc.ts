@@ -14,11 +14,20 @@
 const BLANK = "_";
 
 /**
- * Commands that only read a heredoc as text: `cat` and `tee`, `git` messages and patches (`-C <dir>` only: a `-c`
- * setting such as `core.editor` can make git run what it reads), `gh` PR and issue text.
+ * Commands that only read a heredoc as text: `cat` and `tee`, `git` messages (`-C <dir>` only: a `-c` setting such as
+ * `core.editor` can make git run what it reads), `gh` PR and issue text.
  */
 const TEXT_CONSUMER =
-  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|am|apply|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
+  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
+
+/** A `git` command: its heredoc is the message only when the command says so (`GIT_MESSAGE_FROM_STDIN`). */
+const GIT_COMMAND = /^[ \t]*git[ \t]/;
+
+/**
+ * `git commit <<EOF` without a message option opens the editor, which can read the heredoc from stdin; the body is a
+ * message only when git is told to read it: `-F -`, `--file=-` or `--file -`.
+ */
+const GIT_MESSAGE_FROM_STDIN = /[ \t](?:-F[ \t]+-|--file(?:=|[ \t]+)-)(?=[ \t]|$)/;
 
 /**
  * `git commit -e -F -` runs the editor on the message it read, and git takes option prefixes (`--ed`) and values
@@ -107,6 +116,7 @@ export function blankHeredocBodies(command: string): string {
     if (op === null || more.length > 0 || startQuote !== "" || quote !== "") break;
     const rest = line.slice(0, start) + line.slice(start + op[0].length);
     if (!TEXT_CONSUMER.test(rest) || NOT_SIMPLE.test(rest) || EDITS.test(rest)) break;
+    if (GIT_COMMAND.test(rest) && !GIT_MESSAGE_FROM_STDIN.test(rest)) break;
     const delimiter = op[2] ?? op[3] ?? op[4] ?? (op[5] as string);
     const end = findDelimiter(lines, i + 1, delimiter, op[1] === "-");
     if (end < 0) break;
