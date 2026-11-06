@@ -32,6 +32,8 @@ describe("heredoc bodies are text the rules do not judge", () => {
     "git commit --file=- <<'EOF'\npkill x\nEOF",
     "git commit --file - <<'EOF'\npkill x\nEOF",
     "git notes add -F - <<'EOF'\npkill x\nEOF",
+    "git commit --amend -a -F - <<'EOF'\npkill x\nEOF",
+    "git tag -f -a v1 -F - <<'EOF'\npkill x\nEOF",
     "gh issue comment 7 --body-file - <<'EOF'\npkill x\nEOF",
   ])("allowed: %j", command => {
     expect(kind(command)).toBe("allow");
@@ -84,6 +86,12 @@ describe("everything but a heredoc body is judged as written", () => {
     ["a delimiter word glued to more text", "cat <<'EOF'x\npkill x\nEOF"],
     ["a delimiter that is a variable", "cat <<$X\npkill x\n$X"],
     ["git commit that reads no message from stdin", "git commit <<'EOF'\npkill x\nEOF"],
+    ["git commit with --file=- as a pathspec after --", "git commit -- --file=- <<'EOF'\npkill x\nEOF"],
+    ["git commit with -F - as pathspecs after --", "git commit -- -F - <<'EOF'\npkill x\nEOF"],
+    ["git commit with a real flag and then --", "git commit -F - -- x <<'EOF'\npkill x\nEOF"],
+    ["git commit whose -F is a template file", "git commit -t -F - <<'EOF'\npkill x\nEOF"],
+    ["git commit whose -F - is inside a quoted word", "git commit -m 'x -F - ' <<'EOF'\npkill x\nEOF"],
+    ["git commit with an option that takes a value", "git commit --pathspec-from-file -F - <<'EOF'\npkill x\nEOF"],
     ["git tag that reads no message from stdin", "git tag -a v1 <<'EOF'\npkill x\nEOF"],
     ["git merge, which cannot read its message from stdin", "git merge topic -F - <<'EOF'\npkill x\nEOF"],
     ["git notes that reads no message from stdin", "git notes add <<'EOF'\npkill x\nEOF"],

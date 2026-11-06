@@ -20,14 +20,34 @@ const BLANK = "_";
 const TEXT_CONSUMER =
   /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
 
-/** A `git` command: its heredoc is the message only when the command says so (`GIT_MESSAGE_FROM_STDIN`). */
-const GIT_COMMAND = /^[ \t]*git[ \t]/;
+/** What a `git` heredoc line starts with, up to and including the subcommand. */
+const GIT_SUBCOMMAND = /^[ \t]*git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|notes)(?=[ \t]|$)/;
+
+/** Options after a git subcommand that take no value, so the next word is not swallowed by them. */
+const NO_VALUE_OPTION = /^(?:-[asnqf]|--(?:amend|signoff|no-verify|no-edit|allow-empty|quiet|force|no-gpg-sign))$/;
 
 /**
- * `git commit <<EOF` without a message option opens the editor, which can read the heredoc from stdin; the body is a
- * message only when git is told to read it: `-F -`, `--file=-` or `--file -`.
+ * Whether the words after a git subcommand tell git to read the message from stdin: `-F -`, `--file=-` or `--file -`
+ * (`git commit <<EOF` without a message option opens an editor, which can read the heredoc from stdin). Every other
+ * word must be a positional word or an option that takes no value, so that `-F` is not the value of `-t` or `-m`, and
+ * no word is quoted or follows a bare `--` (a pathspec there is no option).
  */
-const GIT_MESSAGE_FROM_STDIN = /[ \t](?:-F[ \t]+-|--file(?:=|[ \t]+)-)(?=[ \t]|$)/;
+function readsMessageFromStdin(words: string[]): boolean {
+  let stdin = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i] as string;
+    if (w === "-F" || w === "--file") {
+      if (words[i + 1] !== "-") return false;
+      stdin = true;
+      i++;
+    } else if (w === "--file=-") {
+      stdin = true;
+    } else if (w.startsWith("-") ? !NO_VALUE_OPTION.test(w) : /['"]/.test(w)) {
+      return false;
+    }
+  }
+  return stdin;
+}
 
 /**
  * `git commit -e -F -` runs the editor on the message it read, and git takes option prefixes (`--ed`) and values
@@ -116,7 +136,19 @@ export function blankHeredocBodies(command: string): string {
     if (op === null || more.length > 0 || startQuote !== "" || quote !== "") break;
     const rest = line.slice(0, start) + line.slice(start + op[0].length);
     if (!TEXT_CONSUMER.test(rest) || NOT_SIMPLE.test(rest) || EDITS.test(rest)) break;
-    if (GIT_COMMAND.test(rest) && !GIT_MESSAGE_FROM_STDIN.test(rest)) break;
+    if (/^[ \t]*git\b/.test(rest)) {
+      const git = GIT_SUBCOMMAND.exec(rest);
+      if (
+        git === null ||
+        !readsMessageFromStdin(
+          rest
+            .slice(git[0].length)
+            .split(/[ \t]+/)
+            .filter(Boolean),
+        )
+      )
+        break;
+    }
     const delimiter = op[2] ?? op[3] ?? op[4] ?? (op[5] as string);
     const end = findDelimiter(lines, i + 1, delimiter, op[1] === "-");
     if (end < 0) break;
