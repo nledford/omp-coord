@@ -5,107 +5,45 @@
  * branches, worktrees and PRs, applies command rules to agents' bash calls, and offers `/coord` and the `coord_*`
  * tools.
  *
+ * This file wires the hooks and runs the session's life (start, the 2 s tick, stop). The rest is beside it:
+ * `guards.ts` (spawn cap, writes, claims, commands), `board.ts` (`/coord` and the tools), `notices.ts` (what is
+ * delivered to agents and the user) and `runtime.ts` (the state they share).
+ *
  * omp binds this factory once per session in the process (the main session and every subagent). Subagents in an
- * isolated worktree even re-import the module, so the runtime lives on `globalThis`: every copy in the process shares
- * one registration, and every binding is kept so a message can reach the subagent it is for.
+ * isolated worktree even re-import the module, so the runtime lives on `globalThis` (`runtime.ts`).
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { Coordinator } from "../../app/coordinator.ts";
 import type { Listener } from "../../app/ports.ts";
 import { type Config, ConfigError, findConfigFile, loadConfig } from "../../config.ts";
 import { spawnAllowance } from "../../domain/agents.ts";
-import { decideCommand, MAX_CHECKED_COMMAND } from "../../domain/commands.ts";
-import type { Claim } from "../../domain/model.ts";
-import { LATEST_NOTES } from "../../domain/overview.ts";
-import {
-  canonicalWith,
-  decideWrite,
-  type GuardFacts,
-  gitChange,
-  resolveCwd,
-  type WriteDecision,
-  type WriteGuard,
-  writeTargets,
-} from "../../domain/protect.ts";
 import { osLoad } from "../os/load.ts";
 import { BoardStore, stateDir } from "../sqlite/store.ts";
-import {
-  clock,
-  formatAgents,
-  formatFooter,
-  formatInterrupted,
-  formatNotes,
-  formatStats,
-  formatStatus,
-  type StatusOptions,
-} from "../text/report.ts";
+import { formatFooter } from "../text/report.ts";
 import { startBeacon, unixLiveness } from "../unix/beacon.ts";
-import type { ExtensionAPI, ExtensionContext, Timer, ToolCallEvent, ToolResult } from "./api.ts";
+import type { ExtensionAPI, ExtensionContext } from "./api.ts";
+import { registerBoard, registerMainTools } from "./board.ts";
+import { checkSpawn, checkToolCall } from "./guards.ts";
+import { announceStart, deliverNotices } from "./notices.ts";
+import {
+  describe,
+  guarded,
+  isTrackedSubagent,
+  notify,
+  ompSessionIdOf,
+  type Runtime,
+  refreshQueue,
+  scratchFor,
+  shared,
+  syncMainSession,
+} from "./runtime.ts";
 import { loadSettingHandle, type SpawnQueue, spawnQueue } from "./spawn-queue.ts";
-
-/**
- * How agents' queued commands start the runner: the omp binary itself runs the CLI adapter as Bun
- * (`BUN_BE_BUN=1`, as omp does for its own `bun install`), so no separate Bun install is needed.
- */
-const RUNNER = { argv: [process.execPath, join(import.meta.dir, "..", "cli", "cli.ts")], env: { BUN_BE_BUN: "1" } };
 
 const TICK_MS = 2000;
 const PRUNE_EVERY_TICKS = 5;
 const STATUS_KEY = "omp-coord";
-const MESSAGE_TYPE = "omp-coord";
-const NO_CONFIG = "omp-coord is inactive: no .omp-coord.json above this session's folder.";
-const DAY = 86_400_000;
-const CLAIM_KINDS: Claim["kind"][] = ["branch", "worktree", "pr"];
-
-interface Runtime {
-  config: Config;
-  store: BoardStore;
-  coordinator: Coordinator;
-  listener: Listener;
-  sessionId: string;
-  label: string;
-  /** omp's id for the main conversation, as agents' bash calls carry it (`PI_SESSION_ID`). */
-  ompSessionId: string | undefined;
-  /** The main session's binding and context: messages for the session go through them. */
-  pi: ExtensionAPI;
-  ctx: ExtensionContext;
-  timer: Timer;
-  ticks: number;
-  footer: string | undefined;
-  pruning: boolean;
-  /** Drives omp's spawn queue (`agents.queueSpawns`); undefined when off or unavailable. */
-  queue: SpawnQueue | undefined;
-  /** Whether spawns past the cap wait in omp's queue, or why not; shown in coord_status and /coord. */
-  queueNote: string;
-  /** Agents first started by an eval spawn (workpool workers): their later runs are marked "eval" too. */
-  evalAgents: Set<string>;
-}
-
-interface Shared {
-  runtime: Runtime | undefined;
-  /** Why there is no runtime, for tools and `/coord`. */
-  inactive: string;
-  /** Each subagent's binding, by agent id: a message for that subagent is sent through it. */
-  bindings: Map<string, ExtensionAPI>;
-  /** Main-session bindings that shut down, so a `start` for one that awaited across its own shutdown gives up. */
-  shutDown: WeakSet<ExtensionAPI>;
-}
-
-/** Shared by every copy of this module in the process (omp re-imports extensions for isolated subagents). */
-const shared: Shared = (() => {
-  const store = globalThis as { [key: symbol]: Shared | undefined };
-  const key = Symbol.for("omp-coord.runtime");
-  store[key] ??= { runtime: undefined, inactive: NO_CONFIG, bindings: new Map(), shutDown: new WeakSet() };
-  // a copy made by an older version of this module in the same process has no set yet
-  store[key].shutDown ??= new WeakSet();
-  return store[key];
-})();
-
-/** Main-session bindings whose main-only tools are registered, so a repeated `session_start` registers once. */
-const mainToolsRegistered = new WeakSet<ExtensionAPI>();
 
 export default function ompCoord(pi: ExtensionAPI): void {
   pi.setLabel("omp-coord");
@@ -143,35 +81,7 @@ export default function ompCoord(pi: ExtensionAPI): void {
     if (shared.runtime?.pi === pi) stop(shared.runtime);
   });
 
-  pi.on("before_subagent_spawn", (event, ctx) => {
-    const rt = shared.runtime;
-    if (!rt) return undefined;
-    let decision: ReturnType<Coordinator["requestSpawn"]>;
-    try {
-      decision = rt.coordinator.requestSpawn({
-        sessionId: rt.sessionId,
-        parentAgentId: ctx.agent.id,
-        parentIsSubagent: ctx.agent.kind === "sub",
-        agentType: event.agent.toLowerCase(),
-        ...(event.spawnKey === undefined ? {} : { spawnKey: event.spawnKey }),
-        ...(event.invocationKind === undefined ? {} : { invocationKind: event.invocationKind }),
-      });
-      if (event.invocationKind === "eval" && event.spawnKey !== undefined) rt.evalAgents.add(event.spawnKey);
-    } catch (error) {
-      // The cap is a shared agreement, not a security boundary: a broken board must not stop all work.
-      notify(
-        rt,
-        `omp-coord could not check the agent cap, so ${event.agent} starts unchecked: ${describe(error)}`,
-        "error",
-      );
-      return undefined;
-    }
-    // outside the decision: a failure here must never turn a refusal into a start
-    refreshQueue(rt);
-    if (decision.allowed) return undefined;
-    notify(rt, `omp-coord refused ${event.agent} from ${ctx.agent.id}: ${decision.reason}`, "warning");
-    return { block: true, reason: `omp-coord: ${decision.reason}` };
-  });
+  pi.on("before_subagent_spawn", (event, ctx) => checkSpawn(event, ctx));
 
   pi.on("agent_start", (_event, ctx) => {
     const rt = shared.runtime;
@@ -208,281 +118,9 @@ export default function ompCoord(pi: ExtensionAPI): void {
     });
   });
 
-  pi.on("tool_call", (event, ctx) => {
-    const rt = shared.runtime;
-    if (!rt) return undefined;
-    if (event.toolName !== "bash") return guardWrite(rt, event, ctx);
-    const command = event.input?.command;
-    if (typeof command !== "string") return undefined;
-    // the id must be on the board before the command can reach `omp-coord run`, whatever event announced a switch
-    if (ctx.agent.kind === "main") syncMainSession(rt, ctx);
+  pi.on("tool_call", (event, ctx) => checkToolCall(event, ctx));
 
-    try {
-      const cwd = typeof event.input?.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
-      const held = rt.coordinator.checkCommand({
-        sessionId: rt.sessionId,
-        command,
-        cwd,
-        home: homedir(),
-        // A worktree's top folder holds `.git` (a folder in the main checkout, a file in linked worktrees).
-        isWorktreeRoot: dir => existsSync(join(dir, ".git")),
-      });
-      if (held) {
-        const holder = rt.coordinator.board().sessions.find(s => s.id === held.sessionId)?.label ?? "?";
-        // a subagent has no coord_send: it asks through its parent
-        const ask = ctx.agent.kind === "main" ? "ask that session with coord_send" : "tell your parent";
-        return {
-          block: true,
-          reason: `omp-coord: ${held.kind} ${held.target} is claimed by session ${holder} (${held.agentId})${held.note ? `: ${held.note}` : ""}. Leave it alone; ${ask} if you need it.`,
-        };
-      }
-    } catch (error) {
-      notify(rt, `omp-coord could not check claims: ${describe(error)}`, "error");
-    }
-    const gitHeld = guardGit(rt, ctx, command, event.input?.cwd);
-    if (gitHeld) return gitHeld;
-
-    const decision = decideCommand(
-      rt.config.commands,
-      command,
-      { ...RUNNER, owner: rt.sessionId, config: rt.config.source },
-      ctx.agent.kind,
-    );
-    if (decision.kind === "refuse") return { block: true, reason: `omp-coord: ${decision.reason}` };
-    // Only a queued command is rewritten. Which agent runs it needs no rewrite: omp gives every bash call its agent's
-    // session id (`PI_SESSION_ID`), and the board maps that id to the agent (`session_start`, `agent_start`).
-    if (decision.kind === "queue") return { input: { ...event.input, command: decision.command } };
-    return undefined;
-  });
-
-  pi.registerTool<{ notes?: number; compact?: boolean }>({
-    name: "coord_status",
-    label: "Coordination status",
-    description:
-      "Shows sessions, agent slots, the line, claims, build/test queues and recent decisions; check it before starting agents or heavy builds.",
-    parameters: pi.zod.object({
-      notes: pi.zod.number().optional().describe("Decisions to list (default 3; 0 in subagents)"),
-      compact: pi.zod.boolean().optional().describe("Shorter lines (default on in subagents)"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const sub = ctx.agent.kind !== "main";
-      const notes = params.notes ?? (sub ? 0 : LATEST_NOTES);
-      if (!Number.isSafeInteger(notes) || notes < 0) return text("notes must be a whole number, 0 or more", true);
-      return text(statusText(rt, { notes, compact: params.compact ?? sub }));
-    },
-  });
-
-  pi.registerTool<Record<string, never>>({
-    name: "coord_resources",
-    label: "Ports and scratch folder",
-    description:
-      "Your own block of ports and scratch folder, never shared with other agents or sessions; stable per agent.",
-    parameters: pi.zod.object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const lines: string[] = [];
-      if (rt.config.resources.ports) {
-        const r = rt.coordinator.agentPorts(rt.sessionId, ctx.agent.id);
-        lines.push(r.ok ? `Ports: ${r.ports.from}–${r.ports.to} (yours alone)` : `No ports: ${r.reason}`);
-      }
-      const scratch = scratchFor(rt, ctx.agent.id);
-      if (scratch) lines.push(`Scratch folder: ${scratch}`);
-      return lines.length
-        ? text(lines.join("\n"))
-        : text("This scope hands out no ports or scratch folders (resources in .omp-coord.json).", true);
-    },
-  });
-
-  pi.registerCommand("coord", {
-    description:
-      "Coordination with other omp sessions: `/coord` status; `agents`; `send <letter|B/agent|all> <text>`; `pause [reason]`, `resume`; " +
-      "`claim <branch|worktree|pr> <target> [note]`, `release <kind> <target>`; `note <text>`, `notes [n]`; `stats [days]`; `interrupted [hours]`",
-    async handler(args, ctx) {
-      const rt = shared.runtime;
-      if (!rt) {
-        ctx.ui.notify(shared.inactive, "info");
-        return;
-      }
-      const [sub = "", ...rest] = args.trim().split(/\s+/).filter(Boolean);
-      const tail = args.trim().slice(sub.length).trim();
-      const say = (r: ToolResult) => ctx.ui.notify(r.content[0]?.text ?? "", r.isError ? "error" : "info");
-      try {
-        switch (sub) {
-          case "":
-            return ctx.ui.notify(statusText(rt), "info");
-          case "agents":
-            return ctx.ui.notify(formatAgents(rt.coordinator.board(), Date.now()), "info");
-          case "send": {
-            const m = /^(\S+)\s+([\s\S]+)$/.exec(tail);
-            return say(
-              m
-                ? sendFrom(rt, m[1] as string, m[2] as string)
-                : text("usage: /coord send <letter|B/agent|all> <text>", true),
-            );
-          }
-          case "pause":
-            rt.coordinator.pause(rt.sessionId, tail);
-            return ctx.ui.notify(
-              "Paused: no new agent or queued job starts in any session until /coord resume.",
-              "warning",
-            );
-          case "resume":
-            return ctx.ui.notify(rt.coordinator.resume(rt.sessionId) ? "Resumed." : "Was not paused.", "info");
-          case "claim":
-          case "release": {
-            const kind = claimKind(rest[0] ?? "");
-            const target = rest[1];
-            if (!kind || !target)
-              return say(
-                text(
-                  `usage: /coord ${sub} <${CLAIM_KINDS.join("|")}> <target>${sub === "claim" ? " [note]" : ""}`,
-                  true,
-                ),
-              );
-            const r =
-              sub === "claim"
-                ? rt.coordinator.claim({
-                    sessionId: rt.sessionId,
-                    agentId: "Main",
-                    kind,
-                    target,
-                    note: rest.slice(2).join(" "),
-                    cwd: ctx.cwd,
-                  })
-                : rt.coordinator.release({ sessionId: rt.sessionId, kind, target, cwd: ctx.cwd });
-            return say(
-              r.ok ? text(`${sub === "claim" ? "Claimed" : "Released"} ${kind} ${target}.`) : text(r.reason, true),
-            );
-          }
-          case "note": {
-            const r = rt.coordinator.note(rt.sessionId, "user", tail);
-            return say(r.ok ? text(`Recorded as decision #${r.note.id}.`) : text(r.reason, true));
-          }
-          case "notes":
-            return ctx.ui.notify(formatNotes(rt.coordinator.notes(count(rest[0], 20))), "info");
-          case "stats":
-            return ctx.ui.notify(formatStats(rt.coordinator.stats(count(rest[0], 7) * DAY)), "info");
-          case "interrupted":
-            return ctx.ui.notify(formatInterrupted(rt.coordinator.interrupted(count(rest[0], 24) * 3_600_000)), "info");
-          default:
-            return say(text(`unknown /coord subcommand "${sub}"`, true));
-        }
-      } catch (error) {
-        say(text(`omp-coord: ${describe(error)}`, true));
-      }
-    },
-  });
-}
-
-/**
- * The tools only the main session uses. They are registered from the main session's `session_start`, where
- * `ctx.agent.kind` is known, not in the factory: omp rebinds the factory for every subagent, and a subagent's tool
- * list is text in every request it makes.
- */
-function registerMainTools(pi: ExtensionAPI): void {
-  if (mainToolsRegistered.has(pi)) return;
-  mainToolsRegistered.add(pi);
-
-  pi.registerTool<{ to: string; text: string }>({
-    name: "coord_send",
-    label: "Message another omp session",
-    description:
-      "Messages another omp session in this project: `to` is its letter, `<letter>/<agent id>` or `all`; keep it short and factual, never just to acknowledge.",
-    parameters: pi.zod.object({
-      to: pi.zod.string().describe("Letter, `B/<agent id>`, or `all`"),
-      text: pi.zod.string().describe("The message"),
-    }),
-    async execute(_id, params) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      return sendFrom(rt, params.to, params.text);
-    },
-  });
-
-  pi.registerTool<{ kind: string; target: string; note?: string }>({
-    name: "coord_claim",
-    label: "Claim a branch, worktree or PR",
-    description:
-      "Claims a branch, worktree (absolute path) or PR (number) so other sessions' agents can't change it with git or gh until released; refused when held.",
-    parameters: pi.zod.object({
-      kind: pi.zod.string().describe("branch, worktree or pr"),
-      target: pi.zod.string().describe("Branch, worktree path, or PR number"),
-      note: pi.zod.string().optional().describe("What you do with it, which files"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const kind = claimKind(params.kind);
-      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
-      const r = rt.coordinator.claim({
-        sessionId: rt.sessionId,
-        agentId: ctx.agent.id,
-        kind,
-        target: params.target,
-        note: params.note ?? "",
-        cwd: ctx.cwd,
-      });
-      return r.ok ? text(`Claimed ${kind} ${params.target}.`) : text(`Not claimed: ${r.reason}.`, true);
-    },
-  });
-
-  pi.registerTool<{ kind: string; target: string }>({
-    name: "coord_release",
-    label: "Release a claim",
-    description: "Releases a branch, worktree or PR this session claimed.",
-    parameters: pi.zod.object({
-      kind: pi.zod.string().describe("branch, worktree or pr"),
-      target: pi.zod.string().describe("Branch, worktree path, or PR number"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const kind = claimKind(params.kind);
-      if (!kind) return text(`kind must be ${CLAIM_KINDS.join(", ")}`, true);
-      const r = rt.coordinator.release({ sessionId: rt.sessionId, kind, target: params.target, cwd: ctx.cwd });
-      return r.ok ? text(`Released ${kind} ${params.target}.`) : text(`Not released: ${r.reason}.`, true);
-    },
-  });
-
-  pi.registerTool<{ text: string }>({
-    name: "coord_note",
-    label: "Record a decision",
-    description:
-      "Adds a short entry to the decision log every session sees: a user decision with who and when, or a fact all must keep to; not progress.",
-    parameters: pi.zod.object({
-      text: pi.zod.string().describe("E.g. 'User, 14:05: ship #2913 first'"),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const r = rt.coordinator.note(rt.sessionId, ctx.agent.id, params.text);
-      return r.ok ? text(`Recorded as decision #${r.note.id}.`) : text(`Not recorded: ${r.reason}.`, true);
-    },
-  });
-
-  pi.registerTool<{ job: string; priority: string }>({
-    name: "coord_job_priority",
-    label: "Reorder this session's queued jobs",
-    description:
-      "Sets the priority of one of this session's waiting queue jobs; higher goes first, never ahead of other sessions' jobs in fair-share queues.",
-    parameters: pi.zod.object({
-      job: pi.zod.string().describe("Job id from coord_status"),
-      priority: pi.zod.string().describe("Whole number; 0 normal, higher first"),
-    }),
-    async execute(_id, params) {
-      const rt = shared.runtime;
-      if (!rt) return inactive();
-      const priority = Number(params.priority);
-      if (params.priority.trim() === "" || Number.isNaN(priority)) return text("priority must be a whole number", true);
-      const result = rt.coordinator.setJobPriority(rt.sessionId, params.job, priority);
-      return result.ok
-        ? text(`Job ${params.job} now has priority ${priority}.`)
-        : text(`Not changed: ${result.reason}.`, true);
-    },
-  });
+  registerBoard(pi);
 }
 
 async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
@@ -546,35 +184,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   rt.timer = ctx.setInterval(() => tick(rt), TICK_MS);
   refreshQueue(rt);
   await prune(rt);
-
-  const board = rt.coordinator.board();
-  const others = board.sessions.filter(s => s.id !== rt.sessionId);
-  const differing = others.filter(s => s.configHash !== config.hash).map(s => s.label);
-  const pausedNote = board.pause ? " The scope is PAUSED (see /coord)." : "";
-  notify(
-    rt,
-    `omp-coord: this is session ${rt.label} (scope ${config.scope}). ` +
-      (others.length
-        ? `Other sessions: ${others.map(s => `${s.label} (${s.cwd})`).join(", ")}. Agent caps are shared with them.`
-        : "No other session is active.") +
-      pausedNote +
-      ` ${queueNote}`,
-    "info",
-  );
-  if (differing.length) {
-    notify(
-      rt,
-      `omp-coord: sessions ${differing.join(", ")} read a different .omp-coord.json than ${config.source}; their caps and rules differ from this session's.`,
-      "warning",
-    );
-  }
-  if (config.resources.ports && !me?.ports) {
-    notify(
-      rt,
-      "omp-coord: every block of resources.ports is held by other sessions, so this session and its agents get no ports.",
-      "warning",
-    );
-  }
+  announceStart(rt, me?.ports !== undefined);
 }
 
 /** Opens the scope's board, starts this session's liveness socket and registers it; undoes both on failure. */
@@ -610,39 +220,6 @@ function identity(sessionId: string, cwd: string, listener: Listener, ompSession
   };
 }
 
-/** Records the main conversation's omp session id on the board when it is not the one already there. */
-function syncMainSession(rt: Runtime, ctx: ExtensionContext): void {
-  const id = ompSessionIdOf(ctx);
-  if (id === undefined || id === rt.ompSessionId) return;
-  guarded(rt, "record the session id", () => {
-    rt.coordinator.bindOmpSession(rt.sessionId, id);
-    rt.ompSessionId = id;
-  });
-}
-
-/** omp's id for the conversation this context belongs to: what its bash calls carry as `PI_SESSION_ID`. */
-function ompSessionIdOf(ctx: ExtensionContext): string | undefined {
-  return ctx.sessionManager?.getSessionId?.() || undefined;
-}
-
-/** `<scratch>/<session letter>[/<agent id>]`, created on first use; undefined when the scope has no scratch root. */
-function scratchFor(rt: Runtime, agentId?: string): string | undefined {
-  const root = rt.config.resources.scratch;
-  if (!root) return undefined;
-  const dir = agentId && agentId !== "Main" ? join(root, rt.label, agentId) : join(root, rt.label);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-/** Sets omp's spawn queue to what the caps allow this session now (a no-op when the queue isn't driven). */
-function refreshQueue(rt: Runtime): void {
-  if (!rt.queue) return;
-  const queue = rt.queue;
-  guarded(rt, "size omp's spawn queue", () =>
-    queue.apply(spawnAllowance(rt.coordinator.board(), rt.config.agents, rt.sessionId, Date.now())),
-  );
-}
-
 function stop(rt: Runtime): void {
   shared.runtime = undefined;
   rt.queue?.release();
@@ -665,54 +242,7 @@ async function tick(rt: Runtime): Promise<void> {
   );
   rt.label = label;
   rt.queue?.apply(spawnAllowance(board, rt.config.agents, rt.sessionId, now));
-
-  for (const m of inbox) {
-    const framed = (reply: string) =>
-      `[omp-coord] Message from omp session ${m.from} (sent ${clock(m.sentAt)}):\n\n${m.text}\n\n` +
-      `This comes from another omp session in this project, not from the user. Act on it within your own task and rules; ${reply}`;
-    const binding = m.toAgent ? shared.bindings.get(m.toAgent) : undefined;
-    // a subagent has no coord_send: it answers through its parent
-    if (binding) deliver(binding, framed("you cannot message other sessions: tell your parent if it needs an answer."));
-    else {
-      const body = framed(`reply with coord_send to ${m.from} only when it needs an answer.`);
-      deliver(
-        rt.pi,
-        m.toAgent
-          ? `[omp-coord] A message for your subagent ${m.toAgent}, which is not running now. Pass it on with write agent://${m.toAgent} if it still matters:\n\n${body}`
-          : body,
-      );
-    }
-  }
-  for (const h of holds) {
-    const refused =
-      h.agentType === undefined
-        ? "the agent that was refused"
-        : h.agentName === undefined
-          ? `the ${h.agentType} agent that was refused`
-          : `the ${h.agentType} agent ${h.agentName} that was refused`;
-    deliver(
-      rt.pi,
-      `[omp-coord] A ${h.pool} slot is free and held for this session until ${clock(h.until)}. ` +
-        `That spawn did not start: start ${refused} again now; if you no longer need it, ignore this and the slot passes on at ${clock(h.until)}.`,
-    );
-  }
-
-  // what the agent is asked to do; the session passes it on when the agent can't be told itself
-  const stop =
-    "Stop at the next clean point: nothing half-pushed, no rebase or merge in progress, worktree committed; " +
-    "write your handoff and report what is done and what is left.";
-  for (const n of overtime) {
-    const binding = shared.bindings.get(n.agentId);
-    if (binding)
-      deliver(binding, `omp-coord: you have been running ${n.minutes} min (notice at ${n.noticeAtMinutes}). ${stop}`);
-    deliver(
-      rt.pi,
-      `omp-coord: ${n.agentId} has run ${n.minutes} min (notice at ${n.noticeAtMinutes}).` +
-        (binding
-          ? ""
-          : ` It could not be told itself (no live binding); pass the notice on with write agent://${n.agentId}: "${stop}"`),
-    );
-  }
+  deliverNotices(rt, { inbox, holds, overtime });
 
   const footer = formatFooter(board, rt.config.agents, rt.config.queues, rt.sessionId, now);
   if (rt.ctx.mode === "tui" && footer !== rt.footer) {
@@ -731,149 +261,4 @@ async function prune(rt: Runtime): Promise<void> {
   } finally {
     rt.pruning = false;
   }
-}
-
-function sendFrom(rt: Runtime, to: string, body: string): ToolResult {
-  const result = rt.coordinator.send(rt.sessionId, to, body);
-  return result.ok ? text(`Sent to ${result.delivered.join(", ")}.`) : text(`Not sent: ${result.reason}.`, true);
-}
-
-function statusText(rt: Runtime, options: StatusOptions = {}): string {
-  const board = rt.coordinator.board();
-  const status = formatStatus(board, rt.config, rt.sessionId, Date.now(), options);
-  if (options.compact) return status;
-  // whether this session's spawns wait in omp's queue right now, and why not
-  const queueLine = !rt.queue
-    ? rt.queueNote
-    : spawnAllowance(board, rt.config.agents, rt.sessionId, Date.now()) !== undefined
-      ? "Spawns past the cap wait in omp's queue and start as slots free (this is the only session)."
-      : `Spawns over the cap are refused and put this session in line (${board.pause ? "the scope is paused" : board.sessions.length > 1 ? "other sessions are in the scope" : board.slots.some(x => x.sessionId === rt.sessionId && x.unqueued === "eval") ? "a workpool's workers are running" : "no slot is free for a new spawn"}).`;
-  return `${status}\n${queueLine}`;
-}
-
-function inactive(): ToolResult {
-  return text(shared.inactive, true);
-}
-
-function deliver(binding: ExtensionAPI, content: string): void {
-  binding.sendMessage(
-    { customType: MESSAGE_TYPE, content, display: true, attribution: "agent" },
-    { deliverAs: "aside", triggerTurn: true },
-  );
-}
-
-function notify(rt: Runtime, message: string, type: "info" | "warning" | "error"): void {
-  if (rt.ctx.hasUI) rt.ctx.ui.notify(message, type);
-}
-
-/**
- * The `protect` guard for the file tools (`edit`, `write`, `ast_edit`, `apply_patch`): a write into a protected
- * checkout is blocked with a reason naming the resolved path.
- */
-function guardWrite(
-  rt: Runtime,
-  event: ToolCallEvent,
-  ctx: ExtensionContext,
-): { block: true; reason: string } | undefined {
-  if (!rt.config.protect) return undefined;
-  let targets: string[] | undefined;
-  try {
-    targets = writeTargets(event.toolName, event.input ?? {});
-  } catch (error) {
-    notify(rt, `omp-coord could not read a ${event.toolName} call: ${describe(error)}`, "error");
-    return undefined;
-  }
-  if (!targets || targets.length === 0) return undefined;
-  return refuseProtected(rt, ctx, event.toolName, targets, ctx.cwd, (guard, facts) =>
-    decideWrite(guard, ctx.agent.kind, event.toolName, targets, facts),
-  );
-}
-
-/**
- * The `protect` guard for a bash command's state-changing `git`: it must not run in a protected checkout. A command
- * over the length cap is left to `decideCommand`, which refuses it while a refuse rule exists.
- */
-function guardGit(
-  rt: Runtime,
-  ctx: ExtensionContext,
-  command: string,
-  inputCwd: unknown,
-): { block: true; reason: string } | undefined {
-  if (!rt.config.protect || command.length > MAX_CHECKED_COMMAND || !/\bgit\b/.test(command)) return undefined;
-  const cwd = typeof inputCwd === "string" ? resolveCwd(ctx.cwd, inputCwd, homedir()) : ctx.cwd;
-  return refuseProtected(rt, ctx, "bash", [], cwd, (guard, facts) =>
-    gitChange(guard, ctx.agent.kind, command, cwd, facts),
-  );
-}
-
-/**
- * Judges a call with the disk's facts and blocks it on a refusal. Like every guard here it fails open: a check that
- * throws lets the call run; but once the decision is "refuse", failing to log it never lets the call through.
- */
-function refuseProtected(
-  rt: Runtime,
-  ctx: ExtensionContext,
-  tool: string,
-  shown: string[],
-  cwd: string,
-  judge: (guard: WriteGuard, facts: GuardFacts) => WriteDecision,
-): { block: true; reason: string } | undefined {
-  const guard = rt.config.protect;
-  if (!guard) return undefined;
-  let decision: WriteDecision;
-  try {
-    decision = judge(guard, {
-      cwd,
-      home: homedir(),
-      canonical: canonicalWith(p => {
-        try {
-          return realpathSync(p);
-        } catch {
-          return undefined;
-        }
-      }),
-      hasGitEntry: dir => existsSync(join(dir, ".git")),
-    });
-  } catch (error) {
-    notify(rt, `omp-coord could not check a ${tool} call: ${describe(error)}`, "error");
-    return undefined;
-  }
-  if (decision.kind === "allow") return undefined;
-  guarded(rt, "record a refused call", () =>
-    rt.coordinator.recordWriteRefused(rt.sessionId, ctx.agent.id, tool, decision.shown ?? shown),
-  );
-  return { block: true, reason: `omp-coord: ${decision.reason}` };
-}
-
-function claimKind(word: string): Claim["kind"] | undefined {
-  const k = word.trim().toLowerCase();
-  return CLAIM_KINDS.find(x => x === k);
-}
-
-function count(word: string | undefined, fallback: number): number {
-  const n = Number(word);
-  return word !== undefined && Number.isSafeInteger(n) && n > 0 ? n : fallback;
-}
-
-/** Subagents whose runs hold slots. The advisor is an observer, not an agent that does work. */
-function isTrackedSubagent(ctx: ExtensionContext): boolean {
-  return ctx.agent.kind === "sub" && ctx.agent.id !== "advisor" && ctx.agent.name !== "advisor";
-}
-
-function guarded(rt: Runtime, what: string, fn: () => void): void {
-  try {
-    fn();
-  } catch (error) {
-    notify(rt, `omp-coord could not ${what}: ${describe(error)}`, "error");
-  }
-}
-
-function text(body: string, isError = false): ToolResult {
-  return isError
-    ? { content: [{ type: "text", text: body }], isError: true }
-    : { content: [{ type: "text", text: body }] };
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
