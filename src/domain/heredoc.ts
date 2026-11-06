@@ -18,7 +18,7 @@ const BLANK = "_";
  * `core.editor` can make git run what it reads), `gh` PR and issue text.
  */
 const TEXT_CONSUMER =
-  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|merge|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
+  /^[ \t]*(?:(?:cat|tee)|git(?:[ \t]+-C[ \t]+[^\s'"]+)*[ \t]+(?:commit|tag|notes)|gh[ \t]+(?:pr|issue)[ \t]+[a-z]+)(?=[ \t]|$)/;
 
 /** A `git` command: its heredoc is the message only when the command says so (`GIT_MESSAGE_FROM_STDIN`). */
 const GIT_COMMAND = /^[ \t]*git[ \t]/;
