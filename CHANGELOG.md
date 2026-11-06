@@ -6,6 +6,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-06
+
 ### Fixed
 
 - A command no longer skips every `commands` rule because it contains `omp-coord run` or the runner's words: `omp-coord run x; pkill y` was allowed whole, whatever the rules said. Only a command that is the wrapper itself (this extension's rewrite, or `omp-coord run …`, at the start of the command after spaces, tabs or newlines, with nothing after it that could start another command: `;`, `&&`, `||`, `|`, `&` (also in `&>`), a newline, a subshell, `$(`, a backtick, `${`, `$'`) is left alone and not queued twice; any other command is judged by the rules. A command such as `cd /w && omp-coord run test -- cargo test` is therefore no longer exempt and matches a `queue` rule on `cargo test` as it reads. What follows `--` in a plain `omp-coord run <queue> -- <command>` is still not judged (documented in `docs/queues.md`).
@@ -145,7 +147,8 @@ Add each user-visible change under Unreleased as it lands, in one of: Added, Cha
 - An SQLite event log per scope, with retention.
 - Packaging as an omp plugin, with a marketplace catalog; queued commands run on omp's own Bun.
 
-[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/nledford/omp-coord/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/nledford/omp-coord/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/nledford/omp-coord/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nledford/omp-coord/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/nledford/omp-coord/compare/v0.4.1...v0.4.2
